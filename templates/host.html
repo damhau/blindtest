@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Host - Blindtest</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+  <div class="container">
+    <div id="loginScreen" class="screen hidden">
+      <h1>Spotify Authentication Required</h1>
+      <div class="card">
+        <p>To play full tracks, you need to log in with your Spotify account.</p>
+        <p><strong>Note:</strong> Spotify Premium is recommended for best experience.</p>
+        <a href="/login" class="btn btn-primary">Login with Spotify</a>
+        <button id="skipLoginBtn" class="btn btn-secondary">Skip (Use Preview URLs)</button>
+      </div>
+    </div>
+
+    <div id="createScreen" class="screen">
+      <h1>Create a Room</h1>
+      <div class="card">
+        <div id="authStatus" class="auth-status-container hidden">
+          <p class="auth-badge">✓ Logged in with Spotify - Full playback enabled</p>
+          <a href="/logout" class="btn-logout">Logout</a>
+        </div>
+
+        <!-- Playlist selector (shown when authenticated) -->
+        <div id="playlistSelector" class="hidden">
+          <label>Select a Playlist:</label>
+          <div id="playlistLoading" class="loading">Loading your playlists...</div>
+          <div id="playlistGrid" class="playlist-grid"></div>
+        </div>
+
+        <!-- Manual input (shown when not authenticated or as fallback) -->
+        <div id="manualInput">
+          <label for="playlistId">Spotify Playlist ID or URL:</label>
+          <input type="text" id="playlistId" placeholder="72Jj1IPNGZVqPvlqo53rMU">
+          <small>Find the ID in the Spotify playlist URL</small>
+        </div>
+
+        <button id="createRoomBtn" class="btn btn-primary">Create Room</button>
+        <div class="login-options">
+          <p>Or <a href="/login" class="link-login">login with Spotify</a> for full playback</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="waitingScreen" class="screen hidden">
+      <h1>Room Created!</h1>
+      <div class="card">
+        <div class="pin-display">
+          <p>Room PIN:</p>
+          <h2 id="roomPin" class="pin">----</h2>
+        </div>
+        <p>Share this PIN with players</p>
+
+        <div id="participantsList">
+          <h3>Participants (<span id="participantCount">0</span>):</h3>
+          <ul id="participants"></ul>
+        </div>
+
+        <button id="startGameBtn" class="btn btn-primary">Start Game</button>
+      </div>
+    </div>
+
+    <div id="gameScreen" class="screen hidden">
+      <div class="game-header">
+        <h2>Song <span id="songNumber">1</span> of <span id="totalSongs">10</span></h2>
+        <button id="nextSongBtn" class="btn btn-secondary">Next Song</button>
+      </div>
+
+      <div class="question-container">
+        <h3>Who is the artist?</h3>
+        <audio id="audioPlayer" controls></audio>
+
+        <div class="answers-grid">
+          <div class="answer-option red" data-color="red">
+            <span class="option-label">A</span>
+            <span class="artist-name" id="option0"></span>
+          </div>
+          <div class="answer-option blue" data-color="blue">
+            <span class="option-label">B</span>
+            <span class="artist-name" id="option1"></span>
+          </div>
+          <div class="answer-option yellow" data-color="yellow">
+            <span class="option-label">C</span>
+            <span class="artist-name" id="option2"></span>
+          </div>
+          <div class="answer-option green" data-color="green">
+            <span class="option-label">D</span>
+            <span class="artist-name" id="option3"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scoreboard">
+        <h3>Scoreboard</h3>
+        <div id="scoresList"></div>
+      </div>
+    </div>
+
+    <div id="endScreen" class="screen hidden">
+      <h1>🏆 Game Over!</h1>
+      <div class="card">
+        <h2>Final Results</h2>
+        <div id="finalScores"></div>
+        <button id="newGameBtn" class="btn btn-primary">New Game</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='js/host.js') }}"></script>
+</body>
+
+</html>

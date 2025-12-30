@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blindtest - Music Quiz</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+  <div class="container">
+    <h1>🎵 Blindtest Music Quiz</h1>
+
+    <div class="menu">
+      <div class="card">
+        <h2>Host a Game</h2>
+        <p>Create a room and choose a Spotify playlist</p>
+        <a href="/host" class="btn btn-primary">Create Room</a>
+      </div>
+
+      <div class="card">
+        <h2>Join a Game</h2>
+        <p>Enter a 4-digit PIN to join a room</p>
+        <a href="/participant" class="btn btn-secondary">Join Room</a>
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>
