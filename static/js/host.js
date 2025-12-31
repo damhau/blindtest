@@ -10,6 +10,8 @@ let currentQuestion = null;
 let isAuthenticated = false;
 let spotifyPlayer = null;
 let deviceId = null;
+let gamesInSeries = 1;
+let currentGameNumber = 1;
 
 // DOM Elements
 const loginScreen = document.getElementById('loginScreen');
@@ -55,6 +57,15 @@ const QUESTION_TIME_LIMIT = 15; // seconds
 if (songCountSlider && songCountValue) {
   songCountSlider.addEventListener('input', (e) => {
     songCountValue.textContent = e.target.value;
+  });
+}
+
+// Update games count display when slider changes
+const gamesCountSlider = document.getElementById('gamesCountSlider');
+const gamesCountValue = document.getElementById('gamesCountValue');
+if (gamesCountSlider && gamesCountValue) {
+  gamesCountSlider.addEventListener('input', (e) => {
+    gamesCountValue.textContent = e.target.value;
   });
 }
 
@@ -406,31 +417,30 @@ createRoomBtn.addEventListener('click', () => {
 startGameBtn.addEventListener('click', () => {
   if (!currentPin) return;
 
-
-
-  // Get song count from slider
+  // Get song count and games count from sliders
   const songCount = songCountSlider ? parseInt(songCountSlider.value) : 10;
-
+  const gamesCount = gamesCountSlider ? parseInt(gamesCountSlider.value) : 1;
 
   // Disable button and show progress
   startGameBtn.disabled = true;
   startGameBtn.textContent = 'Generating questions...';
 
-  // Hide song count selector and show progress
+  // Hide song count and games count selectors, show progress
   const songCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#songCountSlider)');
+  const gamesCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#gamesCountSlider)');
   const progressContainer = document.getElementById('generatingProgress');
-
 
   if (songCountContainer) {
     songCountContainer.classList.add('hidden');
   }
-
+  if (gamesCountContainer) {
+    gamesCountContainer.classList.add('hidden');
+  }
   if (progressContainer) {
     progressContainer.classList.remove('hidden');
-
   }
 
-  socket.emit('start_game', { pin: currentPin, song_count: songCount });
+  socket.emit('start_game', { pin: currentPin, song_count: songCount, games_count: gamesCount });
 });
 
 // Next Song (button currently commented out in HTML)
@@ -514,16 +524,39 @@ socket.on('game_started', (data) => {
     progressContainer.classList.add('hidden');
   }
 
-  // Show song count selector again
+  // Show song count and games count selectors again
   const songCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#songCountSlider)');
+  const gamesCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#gamesCountSlider)');
   if (songCountContainer) {
     songCountContainer.classList.remove('hidden');
+  }
+  if (gamesCountContainer) {
+    gamesCountContainer.classList.remove('hidden');
   }
 
   startGameBtn.disabled = false;
   startGameBtn.textContent = 'Start Game';
 
   totalSongs.textContent = data.total_songs;
+
+  // Track series info
+  gamesInSeries = data.games_in_series || 1;
+  currentGameNumber = data.current_game || 1;
+
+  // Update header if multiple games
+  if (gamesInSeries > 1) {
+    const gameHeader = document.querySelector('#gameScreen .bg-white.rounded-2xl.shadow-lg.p-6.mb-6');
+    if (gameHeader && !document.getElementById('seriesInfo')) {
+      const seriesInfo = document.createElement('div');
+      seriesInfo.id = 'seriesInfo';
+      seriesInfo.className = 'text-center mb-2';
+      seriesInfo.innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
+      gameHeader.insertBefore(seriesInfo, gameHeader.firstChild);
+    } else if (document.getElementById('seriesInfo')) {
+      document.getElementById('seriesInfo').innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
+    }
+  }
+
   showScreen(gameScreen);
 });
 
@@ -609,6 +642,7 @@ socket.on('advance_question', () => {
 });
 
 socket.on('game_ended', (data) => {
+  // This is the end of one game in a series (not the final game)
   // Hide standings modal if showing
   if (standingsModal && !standingsModal.classList.contains('hidden')) {
     standingsModal.classList.add('hidden');
@@ -621,7 +655,25 @@ socket.on('game_ended', (data) => {
     audioPlayer.pause();
   }
 
-  displayFinalScores(data.final_scores);
+  // Display intermediate game results with series scores
+  displayGameEndScores(data.game_scores, data.series_scores, data.current_game, data.total_games);
+});
+
+socket.on('series_ended', (data) => {
+  // This is the end of the entire series
+  // Hide standings modal if showing
+  if (standingsModal && !standingsModal.classList.contains('hidden')) {
+    standingsModal.classList.add('hidden');
+  }
+
+  // Stop music/audio playback
+  if (spotifyPlayer && deviceId) {
+    spotifyPlayer.pause();
+  } else if (audioPlayer) {
+    audioPlayer.pause();
+  }
+
+  displayFinalScores(data.final_scores, data.games_played);
   showScreen(endScreen);
 });
 
@@ -802,8 +854,8 @@ function displayVotedParticipant(playerName) {
   avatarDiv.className = 'flex flex-col items-center gap-1';
   avatarDiv.setAttribute('data-player', playerName);
   avatarDiv.innerHTML = `
-    <img src="${avatarUrl}" alt="${playerName}" class="w-10 h-10 rounded-full shadow-md">
-    <span class="text-xs text-gray-600 font-medium max-w-[60px] truncate">${playerName}</span>
+    <img src="${avatarUrl}" alt="${playerName}" class="w-12 h-12 rounded-full shadow-md">
+    <span class="text-sm text-gray-600 font-medium max-w-[70px] truncate">${playerName}</span>
   `;
 
   votedParticipants.appendChild(avatarDiv);
@@ -887,11 +939,131 @@ function updateIntermediateScoreboard(scores) {
   });
 }
 
-function displayFinalScores(scores) {
+function displayGameEndScores(gameScores, seriesScores, currentGame, totalGames) {
+  // Create a modal for intermediate game results
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-backdrop"></div>
+    <div class="modal-content max-w-3xl">
+      <div class="text-center mb-6">
+        <h2 class="text-3xl font-bold text-gray-800 mb-2">Game ${currentGame} Complete! 🎉</h2>
+        <p class="text-gray-600">Game ${currentGame} of ${totalGames}</p>
+      </div>
+      
+      <div class="mb-6">
+        <h3 class="text-xl font-bold text-gray-800 mb-4">This Game Results</h3>
+        <div id="gameScoresList" class="space-y-2 mb-6"></div>
+      </div>
+      
+      <div class="mb-6 pt-6 border-t-2 border-gray-200">
+        <h3 class="text-xl font-bold text-gray-800 mb-4">Overall Series Standings</h3>
+        <div id="seriesScoresList" class="space-y-2"></div>
+      </div>
+      
+      <div class="text-center mb-4">
+        <p class="text-gray-600 mb-2">Next game starts in</p>
+        <div class="text-5xl font-bold text-primary" id="nextGameCountdown">10</div>
+      </div>
+      
+      <button onclick="startNextGameNow(this)" 
+        class="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold py-4 rounded-lg shadow-lg transition-all text-lg">
+        Start Game ${currentGame + 1} Now
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // Start countdown timer
+  let countdown = 10;
+  const countdownElement = modal.querySelector('#nextGameCountdown');
+  const countdownInterval = setInterval(() => {
+    countdown--;
+    if (countdownElement) {
+      countdownElement.textContent = countdown;
+
+      // Add visual emphasis when countdown is low
+      if (countdown <= 3) {
+        countdownElement.classList.add('text-red-500');
+        countdownElement.classList.remove('text-primary');
+      }
+    }
+
+    if (countdown <= 0) {
+      clearInterval(countdownInterval);
+      modal.remove();
+      socket.emit('start_next_game', { pin: currentPin });
+    }
+  }, 1000);
+
+  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
+
+  // Display game scores
+  const gameScoresList = modal.querySelector('#gameScoresList');
+  gameScores.forEach((player, index) => {
+    const div = document.createElement('div');
+    div.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg';
+    const color = colors[index % colors.length];
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
+
+    div.innerHTML = `
+      <div class="flex items-center gap-3">
+        <span class="text-xl font-bold text-gray-600 w-6">${index + 1}</span>
+        <img src="${avatarUrl}" alt="${player.name}" class="w-10 h-10 rounded-full">
+        <span class="text-base font-semibold text-gray-800">${player.name}</span>
+      </div>
+      <span class="text-lg font-bold text-primary">${player.score} pts</span>
+    `;
+    gameScoresList.appendChild(div);
+  });
+
+  // Display series scores
+  const seriesScoresList = modal.querySelector('#seriesScoresList');
+  seriesScores.forEach((player, index) => {
+    const div = document.createElement('div');
+    div.className = 'flex items-center justify-between p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border-2 border-primary';
+    const color = colors[index % colors.length];
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
+
+    let medal = '';
+    if (index === 0) medal = '🥇';
+    else if (index === 1) medal = '🥈';
+    else if (index === 2) medal = '🥉';
+
+    div.innerHTML = `
+      <div class="flex items-center gap-4">
+        ${medal ? `<span class="text-2xl">${medal}</span>` : `<span class="text-xl font-bold text-gray-600 w-6">${index + 1}</span>`}
+        <img src="${avatarUrl}" alt="${player.name}" class="w-12 h-12 rounded-full">
+        <span class="text-lg font-semibold text-gray-800">${player.name}</span>
+      </div>
+      <span class="text-2xl font-bold text-purple-600">${player.series_score} pts</span>
+    `;
+    seriesScoresList.appendChild(div);
+  });
+}
+
+function startNextGameNow(button) {
+  // Remove the modal
+  const modal = button.closest('.modal');
+  if (modal) {
+    modal.remove();
+  }
+  // Start next game immediately
+  socket.emit('start_next_game', { pin: currentPin });
+}
+
+function displayFinalScores(scores, gamesPlayed) {
   finalScores.innerHTML = '';
 
   // Random color palette for avatars
   const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
+
+  // Update title if multiple games
+  const endTitle = document.querySelector('#endScreen h1');
+  if (endTitle && gamesPlayed > 1) {
+    endTitle.textContent = `Series Complete! (${gamesPlayed} Games)`;
+  }
 
   scores.forEach((player, index) => {
     const div = document.createElement('div');
@@ -906,13 +1078,16 @@ function displayFinalScores(scores) {
     const color = colors[index % colors.length];
     const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
 
+    // Use series_score for multi-game, score for single game
+    const finalScore = player.series_score !== undefined ? player.series_score : player.score;
+
     div.innerHTML = `
       <div class="flex items-center gap-4">
         ${medal ? `<span class="text-3xl">${medal}</span>` : `<span class="text-2xl font-bold text-gray-600 w-8">${index + 1}</span>`}
         <img src="${avatarUrl}" alt="${player.name}" class="w-12 h-12 rounded-full">
         <span class="text-lg font-semibold text-gray-800">${player.name}</span>
       </div>
-      <span class="text-xl font-bold text-primary">${player.score} pts</span>
+      <span class="text-xl font-bold text-primary">${finalScore} pts</span>
     `;
 
     finalScores.appendChild(div);

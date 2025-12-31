@@ -49,6 +49,12 @@ class Room:
         self.created_at = datetime.now()
         self.colors = ['red', 'blue', 'yellow', 'green']
         self.question_start_scores = {}  # Track scores at start of each question
+        # Series tracking
+        self.games_in_series = 1  # Total number of games to play
+        self.current_game_number = 1  # Current game (1-indexed)
+        self.series_scores = {}  # sid -> cumulative score across all games
+        self.all_questions = []  # All questions for all games
+        self.game_questions_map = {}  # game_number -> list of question indices
 
     def add_participant(self, sid, name):
         self.participants[sid] = {
@@ -56,6 +62,9 @@ class Room:
             'name': name,
             'score': 0
         }
+        # Initialize series score for new participant
+        if sid not in self.series_scores:
+            self.series_scores[sid] = 0
 
     def remove_participant(self, sid):
         if sid in self.participants:
@@ -67,6 +76,18 @@ class Room:
             key=lambda x: x['score'],
             reverse=True
         )
+    
+    def get_series_scores(self):
+        """Get cumulative scores across all games in series"""
+        series_scores_list = []
+        for sid, player in self.participants.items():
+            series_scores_list.append({
+                'sid': sid,
+                'name': player['name'],
+                'series_score': self.series_scores.get(sid, 0),
+                'game_score': player['score']
+            })
+        return sorted(series_scores_list, key=lambda x: x['series_score'], reverse=True)
 
     def record_answer(self, sid, answer):
         if self.question_index not in self.answers:
@@ -608,11 +629,13 @@ def handle_start_game(data):
     
     pin = data.get('pin')
     song_count = data.get('song_count', 10)  # Default to 10 if not provided
+    games_count = data.get('games_count', 1)  # Default to 1 game
     
-    # Validate song count
-    song_count = max(5, min(30, song_count))  # Clamp between 5 and 30
+    # Validate counts
+    song_count = max(1, min(30, song_count))  # Clamp between 1 and 30
+    games_count = max(1, min(5, games_count))  # Clamp between 1 and 5
 
-    print(f'Starting game in room {pin} with {song_count} songs')
+    print(f'Starting game series in room {pin}: {games_count} game(s) with {song_count} songs each')
     
     if pin not in rooms:
         emit('error', {'message': 'Room not found'})
@@ -653,9 +676,17 @@ def handle_start_game(data):
         emit('error', {'message': 'No tracks found in playlist. Try a different playlist with more songs.'})
         return
     
-    # Randomize and select the requested number of songs
+    # Calculate total songs needed for all games
+    total_songs_needed = song_count * games_count
+    
+    # Randomize and select enough songs for ALL games
     random.shuffle(tracks)
-    tracks = tracks[:song_count]
+    tracks = tracks[:total_songs_needed]
+    
+    # Check if we have enough tracks
+    if len(tracks) < total_songs_needed:
+        emit('error', {'message': f'Not enough tracks in playlist. Need {total_songs_needed} but only found {len(tracks)}. Try a larger playlist or reduce songs/games.'})
+        return
     
     # Check audio availability
     tracks_with_audio = sum(1 for t in tracks if t.get('preview_url'))
@@ -671,8 +702,10 @@ def handle_start_game(data):
         if room.token_info:
             print(f"User is authenticated - allowing game to proceed without preview URLs")
     
-    # Generate questions with fake artists
+    # Generate ALL questions for ALL games with fake artists
     total_tracks = len(tracks)
+    print(f"Generating {total_tracks} questions for {games_count} game(s) of {song_count} songs each")
+    
     for idx, track in enumerate(tracks, 1):
         # Emit progress update
         socketio.emit('question_progress', {
@@ -705,8 +738,18 @@ def handle_start_game(data):
                 fake_artists += [f"Artist {i}" for i in range(3 - len(fake_artists))]
         
         question = room.generate_question(track, fake_artists)
-        room.questions.append(question)
+        room.all_questions.append(question)
     
+    # Split questions into game-specific pools
+    for game_num in range(1, games_count + 1):
+        start_idx = (game_num - 1) * song_count
+        end_idx = game_num * song_count
+        room.game_questions_map[game_num] = list(range(start_idx, end_idx))
+    
+    # Set up first game with its questions
+    room.games_in_series = games_count
+    room.current_game_number = 1
+    room.questions = [room.all_questions[i] for i in room.game_questions_map[1]]
     room.state = 'playing'
     room.question_index = 0
     room.current_question = room.questions[0]
@@ -714,7 +757,9 @@ def handle_start_game(data):
     # Notify all players game is starting
     socketio.emit('game_started', {
         'total_songs': len(room.questions),
-        'has_oauth': room.token_info is not None
+        'has_oauth': room.token_info is not None,
+        'games_in_series': games_count,
+        'current_game': 1
     }, room=pin)
     
     # Send first question
@@ -892,12 +937,31 @@ def handle_standings_displayed(data):
         is_last_question = (rooms[pin].question_index + 1) >= len(rooms[pin].questions)
         
         if is_last_question:
-            # End the game
-            rooms[pin].state = 'ended'
-            socketio.emit('game_ended', {
-                'final_scores': rooms[pin].get_scores()
-            }, room=pin)
-            print(f'Game ended in room {pin}')
+            room = rooms[pin]
+            # Update series scores with current game scores
+            for sid, player in room.participants.items():
+                room.series_scores[sid] = room.series_scores.get(sid, 0) + player['score']
+            
+            # Check if this was the last game in the series
+            is_last_game = room.current_game_number >= room.games_in_series
+            
+            if is_last_game:
+                # End the entire series
+                room.state = 'ended'
+                socketio.emit('series_ended', {
+                    'final_scores': room.get_series_scores(),
+                    'games_played': room.games_in_series
+                }, room=pin)
+                print(f'Game series ended in room {pin} after {room.games_in_series} game(s)')
+            else:
+                # End current game and prepare for next
+                socketio.emit('game_ended', {
+                    'game_scores': room.get_scores(),
+                    'series_scores': room.get_series_scores(),
+                    'current_game': room.current_game_number,
+                    'total_games': room.games_in_series
+                }, room=pin)
+                print(f'Game {room.current_game_number}/{room.games_in_series} ended in room {pin}')
         else:
             # Auto-advance to next question
             socketio.emit('advance_question', {}, room=pin, to=rooms[pin].host_sid)
@@ -913,6 +977,57 @@ def handle_ready_for_next(data):
     if pin in rooms and sid in rooms[pin].participants:
         rooms[pin].standings_ready_acks.add(sid)
         print(f'Participant {rooms[pin].participants[sid]["name"]} ready for next question')
+
+
+@socketio.on('start_next_game')
+def handle_start_next_game(data):
+    """Start the next game in a multi-game series"""
+    pin = data.get('pin')
+    
+    if pin not in rooms:
+        emit('error', {'message': 'Room not found'})
+        return
+    
+    room = rooms[pin]
+    
+    if room.host_sid != request.sid:
+        emit('error', {'message': 'Only host can start next game'})
+        return
+    
+    # Reset game state but keep series scores
+    room.current_game_number += 1
+    room.question_index = 0
+    room.answers = {}
+    room.voting_closed = False
+    room.correct_answer_acks = set()
+    room.standings_ready_acks = set()
+    room.question_start_scores = {}
+    
+    # Reset individual game scores to 0
+    for sid, player in room.participants.items():
+        player['score'] = 0
+    
+    # Load next game's questions from the pre-generated pool
+    game_question_indices = room.game_questions_map[room.current_game_number]
+    room.questions = [room.all_questions[i] for i in game_question_indices]
+    
+    room.current_question = room.questions[0]
+    room.state = 'playing'
+    
+    print(f"Loaded {len(room.questions)} unique questions for game {room.current_game_number}")
+    
+    # Notify all players that next game is starting
+    socketio.emit('game_started', {
+        'total_songs': len(room.questions),
+        'has_oauth': room.token_info is not None,
+        'games_in_series': room.games_in_series,
+        'current_game': room.current_game_number
+    }, room=pin)
+    
+    # Send first question
+    send_question(pin)
+    
+    print(f'Game {room.current_game_number}/{room.games_in_series} started in room {pin}')
 
 
 @socketio.on('submit_answer')

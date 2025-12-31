@@ -290,14 +290,28 @@
         <!-- Song Count Selector -->
         <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
           <label class="block text-lg font-semibold text-gray-800 mb-4">
-            Number of songs: <span id="songCountValue" class="text-primary">10</span>
+            Number of songs per game: <span id="songCountValue" class="text-primary">10</span>
           </label>
-          <input type="range" id="songCountSlider" min="5" max="30" value="10" step="1"
+          <input type="range" id="songCountSlider" min="1" max="30" value="10" step="1"
             class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
           <div class="flex justify-between text-sm text-gray-500 mt-2">
-            <span>5 songs</span>
+            <span>1 song</span>
             <span>30 songs</span>
           </div>
+        </div>
+
+        <!-- Games Count Selector -->
+        <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+          <label class="block text-lg font-semibold text-gray-800 mb-4">
+            Number of games: <span id="gamesCountValue" class="text-primary">1</span>
+          </label>
+          <input type="range" id="gamesCountSlider" min="1" max="5" value="1" step="1"
+            class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
+          <div class="flex justify-between text-sm text-gray-500 mt-2">
+            <span>1 game</span>
+            <span>5 games</span>
+          </div>
+          <p class="text-sm text-gray-500 mt-2">Play multiple games in a row with cumulative scoring</p>
         </div>
 
         <!-- Progress Indicator -->
@@ -309,7 +323,7 @@
               style="width: 0%"></div>
           </div>
           <p id="progressText" class="text-sm text-gray-600 text-center">
-            Preparing track 0 of <span id="progressTotalSongs">10</span>
+
           </p>
         </div>
 

@@ -10,6 +10,8 @@ let currentName = null;
 let hasAnswered = false;
 let selectedAnswer = null;
 let readyForNextTimer = null;
+let gamesInSeries = 1;
+let currentGameNumber = 1;
 
 // DOM Elements
 const joinScreen = document.getElementById('joinScreen');
@@ -147,6 +149,36 @@ socket.on('participant_left', (data) => {
 });
 
 socket.on('game_started', (data) => {
+  // Display player name in game screen
+  const gamePlayerName = document.getElementById('gamePlayerName');
+  if (gamePlayerName) {
+    gamePlayerName.textContent = currentName;
+  }
+
+  // Track series info
+  gamesInSeries = data?.games_in_series || 1;
+  currentGameNumber = data?.current_game || 1;
+
+  // Update header if multiple games - now insert into the player info card (p-6)
+  if (gamesInSeries > 1) {
+    const playerInfoCard = document.querySelector('#gameScreen .bg-white.rounded-2xl.shadow-lg.p-6');
+    if (playerInfoCard && !document.getElementById('seriesInfo')) {
+      const seriesInfo = document.createElement('div');
+      seriesInfo.id = 'seriesInfo';
+      seriesInfo.className = 'text-center mb-3';
+      seriesInfo.innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
+      playerInfoCard.insertBefore(seriesInfo, playerInfoCard.firstChild);
+    } else if (document.getElementById('seriesInfo')) {
+      document.getElementById('seriesInfo').innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
+    }
+  } else {
+    // Remove series info if it exists (single game)
+    const seriesInfo = document.getElementById('seriesInfo');
+    if (seriesInfo) {
+      seriesInfo.remove();
+    }
+  }
+
   showScreen(gameScreen);
 });
 
@@ -174,9 +206,9 @@ socket.on('new_question_participant', (data) => {
 });
 
 socket.on('answer_feedback', (data) => {
-  playerScore.textContent = data.your_score;
-
-  // Don't show feedback message - just update score silently
+  // Keep the selected button pressed - don't remove the class
+  // The button will stay pressed until the next question
+  // Note: Score is not displayed anymore
 });
 
 socket.on('scores_updated', (data) => {
@@ -192,12 +224,14 @@ socket.on('show_correct_answer', (data) => {
 
   // Highlight the correct answer button with a checkmark
   const correctIndex = data.correct_answer;
+  const letters = ['A', 'B', 'C', 'D'];
+
   answerButtons.forEach((btn, index) => {
     if (index === correctIndex) {
       // Add checkmark to correct answer
       btn.innerHTML = `
         <div class="flex items-center justify-center gap-3">
-          <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
+          <span class="text-5xl font-bold">${letters[index]}</span>
           <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" fill="#10b981" opacity="0.3"/>
             <path d="M9 12l2 2 4-4"/>
@@ -210,7 +244,7 @@ socket.on('show_correct_answer', (data) => {
       // Add red X to wrong answer they selected
       btn.innerHTML = `
         <div class="flex items-center justify-center gap-3">
-          <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
+          <span class="text-5xl font-bold">${letters[index]}</span>
           <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" fill="#ef4444" opacity="0.3"/>
             <path d="M8 8l8 8M16 8l-8 8"/>
@@ -250,6 +284,16 @@ socket.on('question_timeout', () => {
 });
 
 socket.on('game_ended', (data) => {
+  // For single games or when intermediate game ends in a series
+  // In series, this goes to host only (not participants)
+  if (data.final_scores) {
+    displayFinalScores(data.final_scores);
+    showScreen(endScreen);
+  }
+});
+
+socket.on('series_ended', (data) => {
+  // When entire series ends, show final scores to participants
   displayFinalScores(data.final_scores);
   showScreen(endScreen);
 });
@@ -352,7 +396,9 @@ function displayFinalScores(scores) {
   // Find current player's score
   const myScore = scores.find(s => s.name === currentName);
   if (myScore) {
-    finalScore.textContent = myScore.score;
+    // Use series_score for multi-game, score for single game
+    const displayScore = myScore.series_score !== undefined ? myScore.series_score : myScore.score;
+    finalScore.textContent = displayScore;
   }
 
   finalScores.innerHTML = '';
@@ -370,9 +416,12 @@ function displayFinalScores(scores) {
     else if (index === 1) medal = '🥈 ';
     else if (index === 2) medal = '🥉 ';
 
+    // Use series_score for multi-game, score for single game
+    const displayScore = player.series_score !== undefined ? player.series_score : player.score;
+
     div.innerHTML = `
             <span>${medal}${player.name}</span>
-            <span>${player.score} pts</span>
+            <span>${displayScore} pts</span>
         `;
 
     finalScores.appendChild(div);

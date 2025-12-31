@@ -55,20 +55,21 @@
 
 <body class="min-h-screen" style="background-color: #fefdfe;">
   <!-- Top Navigation -->
-  <nav class="bg-white border-b border-gray-200 px-6 py-4">
+  <nav class="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <!-- Left: Logo -->
-      <div class="flex items-center gap-3">
-        <img src="/static/assets/logo.png" alt="BlindTest Logo" class="h-10">
-        <div class="flex items-baseline gap-2">
-          <span class="text-xl font-bold text-gray-800">MusicQuiz</span>
-          <span class="text-sm text-gray-500 font-medium">Blindtest</span>
+      <div class="flex items-center gap-2 sm:gap-3">
+        <img src="/static/assets/logo.png" alt="BlindTest Logo" class="h-8 sm:h-10">
+        <div class="flex items-baseline gap-1 sm:gap-2">
+          <span class="text-lg sm:text-xl font-bold text-gray-800">MusicQuiz</span>
+          <span class="text-xs sm:text-sm text-gray-500 font-medium hidden xs:inline">Blindtest</span>
         </div>
       </div>
 
       <!-- Right: Actions -->
-      <div class="flex items-center gap-4">
-        <button class="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
+      <div class="flex items-center gap-2 sm:gap-4">
+        <button
+          class="hidden md:flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
           <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
             <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
             <path fill-rule="evenodd"
@@ -77,7 +78,8 @@
           </svg>
           <span class="font-semibold text-sm">Leaderboard</span>
         </button>
-        <button class="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
+        <button
+          class="hidden md:flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
           <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
             <path
               d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z" />
@@ -137,31 +139,34 @@
           </div>
         </div>
         <a href="/login" id="loginButton"
-          class="hidden items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-semibold text-sm">
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          class="hidden items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-semibold text-xs sm:text-sm">
+          <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
             <path
               d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
           </svg>
-          Login with Spotify
+          <span class="hidden sm:inline">Login with Spotify</span>
+          <span class="sm:hidden">Login</span>
         </a>
       </div>
     </div>
   </nav>
 
   <!-- Main Content -->
-  <div class="max-w-5xl mx-auto px-6 py-12">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
     <!-- Hero Section with Banner -->
-    <div class="text-center mb-12 relative">
+    <div class="text-center mb-8 sm:mb-12 relative">
       <!-- Banner Image -->
-      <div class="relative inline-block mb-8">
-        <img src="/static/assets/banner.png" alt="BlindTest Banner" class="mx-auto max-w-2xl w-full">
+      <div class="relative inline-block mb-6 sm:mb-8">
+        <img src="/static/assets/banner.png" alt="BlindTest Banner"
+          class="mx-auto max-w-full sm:max-w-2xl w-full px-4 sm:px-0">
       </div>
 
-      <h1 class="text-5xl font-bold text-gray-800 mb-4">Get Ready to Guess the Song!</h1>
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-800 mb-3 sm:mb-4 px-4">Get Ready to Guess the
+        Song!</h1>
 
       <!-- Countdown Timer -->
-      <div class="mb-8">
-        <p class="text-gray-600 text-lg mb-2">Use your own spotify playlist or any public playlist</p>
+      <div class="mb-6 sm:mb-8 px-4">
+        <p class="text-gray-600 text-base sm:text-lg mb-2">Use your own spotify playlist or any public playlist</p>
       </div>
 
       <!-- Join Game Button -->
@@ -172,11 +177,11 @@
     </div>
 
     <!-- Action Cards -->
-    <div class="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+    <div class="grid sm:grid-cols-2 gap-4 sm:gap-8 max-w-3xl mx-auto px-4">
       <!-- Host a Game Card (was Quick Play) -->
       <a href="/host" class="block group">
         <div
-          class="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-3xl p-6 shadow-lg card-hover text-white relative overflow-hidden">
+          class="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-lg card-hover text-white relative overflow-hidden">
           <div class="absolute top-0 right-0 opacity-10">
             <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 20 20">
               <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
@@ -185,20 +190,20 @@
           </div>
 
           <div class="relative">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="bg-white/20 p-2.5 rounded-xl">
-                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <div class="bg-white/20 p-2 sm:p-2.5 rounded-lg sm:rounded-xl">
+                <svg class="w-6 h-6 sm:w-7 sm:h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
               </div>
-              <span class="text-2xl font-bold">Host Game</span>
+              <span class="text-xl sm:text-2xl font-bold">Host Game</span>
             </div>
 
-            <p class="text-white/90 text-sm mb-6">Create a room & choose playlist</p>
+            <p class="text-white/90 text-sm mb-4 sm:mb-6">Create a room & choose playlist</p>
 
-            <div class="text-white/70 text-sm font-semibold">
-              <span class="bg-white/10 px-3 py-1.5 rounded-full">Host & Play</span>
+            <div class="text-white/70 text-xs sm:text-sm font-semibold">
+              <span class="bg-white/10 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full">Host & Play</span>
             </div>
           </div>
         </div>
@@ -207,7 +212,7 @@
       <!-- Join Game Card (was 2000s Hits) -->
       <a href="/participant" class="block group">
         <div
-          class="bg-gradient-to-br from-cyan-500 to-teal-500 rounded-3xl p-6 shadow-lg card-hover text-white relative overflow-hidden">
+          class="bg-gradient-to-br from-cyan-500 to-teal-500 rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-lg card-hover text-white relative overflow-hidden">
           <div class="absolute top-0 right-0 opacity-10">
             <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd"
@@ -217,20 +222,20 @@
           </div>
 
           <div class="relative">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="bg-white/20 p-2.5 rounded-xl">
-                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <div class="bg-white/20 p-2 sm:p-2.5 rounded-lg sm:rounded-xl">
+                <svg class="w-6 h-6 sm:w-7 sm:h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                 </svg>
               </div>
-              <span class="text-2xl font-bold">Join Game</span>
+              <span class="text-xl sm:text-2xl font-bold">Join Game</span>
             </div>
 
-            <p class="text-white/90 text-sm mb-6">Enter 4-digit PIN to play</p>
+            <p class="text-white/90 text-sm mb-4 sm:mb-6">Enter 4-digit PIN to play</p>
 
-            <div class="text-white/70 text-sm font-semibold">
-              <span class="bg-white/10 px-3 py-1.5 rounded-full">Join Quiz</span>
+            <div class="text-white/70 text-xs sm:text-sm font-semibold">
+              <span class="bg-white/10 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full">Join Quiz</span>
             </div>
           </div>
         </div>
@@ -416,8 +421,8 @@
     function showNotification(message, type = 'info') {
       const toast = document.createElement('div');
       toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${type === 'success' ? 'bg-green-500' :
-          type === 'error' ? 'bg-red-500' :
-            'bg-blue-500'
+        type === 'error' ? 'bg-red-500' :
+          'bg-blue-500'
         } text-white font-medium transition-opacity duration-300`;
       toast.textContent = message;
 
