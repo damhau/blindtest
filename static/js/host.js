@@ -19,6 +19,7 @@ const standingsModal = document.getElementById('standingsModal');
 const gameScreen = document.getElementById('gameScreen');
 const endScreen = document.getElementById('endScreen');
 const authStatus = document.getElementById('authStatus');
+const loginOptions = document.getElementById('loginOptions');
 const skipLoginBtn = document.getElementById('skipLoginBtn');
 
 const playlistIdInput = document.getElementById('playlistId');
@@ -54,7 +55,28 @@ if (songCountSlider && songCountValue) {
   });
 }
 
-// Force hide auth status immediately
+// Helper function to update auth UI
+function updateAuthUI(authenticated) {
+  if (authenticated) {
+    if (authStatus) {
+      authStatus.classList.remove('hidden');
+      authStatus.style.display = 'block';
+    }
+    if (loginOptions) {
+      loginOptions.classList.add('hidden');
+    }
+  } else {
+    if (authStatus) {
+      authStatus.classList.add('hidden');
+      authStatus.style.display = 'none';
+    }
+    if (loginOptions) {
+      loginOptions.classList.remove('hidden');
+    }
+  }
+}
+
+// Initially hide auth status until we check
 if (authStatus) {
   authStatus.classList.add('hidden');
   authStatus.style.display = 'none';
@@ -180,66 +202,25 @@ function fetchSpotifyToken() {
     });
 }
 
-// Force hide auth status immediately
-if (authStatus) {
-  authStatus.classList.add('hidden');
-  authStatus.style.display = 'none';
-}
-
 // Check authentication status on page load
 window.addEventListener('load', () => {
-  // Always start with auth status hidden
-  if (authStatus) {
-    authStatus.classList.add('hidden');
-    authStatus.style.display = 'none';
-  }
-
   const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('authenticated') === 'true') {
-    // Verify with server before showing
-    fetch('/check_auth')
-      .then(res => res.json())
-      .then(data => {
-        if (data.authenticated) {
-          isAuthenticated = true;
-          if (authStatus) {
-            authStatus.classList.remove('hidden');
-            authStatus.style.display = 'block';
-          }
-          loadUserPlaylists();
-          fetchSpotifyToken();
-        }
-      })
-      .catch(err => {
-        console.error('Auth check failed:', err);
-        if (authStatus) {
-          authStatus.classList.add('hidden');
-          authStatus.style.display = 'none';
-        }
-      });
-  } else {
-    // Check if already authenticated
-    fetch('/check_auth')
-      .then(res => res.json())
-      .then(data => {
-        if (data.authenticated) {
-          isAuthenticated = true;
-          if (authStatus) {
-            authStatus.classList.remove('hidden');
-            authStatus.style.display = 'block';
-          }
-          loadUserPlaylists();
-          fetchSpotifyToken();
-        }
-      })
-      .catch(err => {
-        console.error('Auth check failed:', err);
-        if (authStatus) {
-          authStatus.classList.add('hidden');
-          authStatus.style.display = 'none';
-        }
-      });
-  }
+
+  fetch('/check_auth')
+    .then(res => res.json())
+    .then(data => {
+      isAuthenticated = data.authenticated;
+      updateAuthUI(data.authenticated);
+
+      if (data.authenticated) {
+        loadUserPlaylists();
+        fetchSpotifyToken();
+      }
+    })
+    .catch(err => {
+      console.error('Auth check failed:', err);
+      updateAuthUI(false);
+    });
 });
 
 // Load user's playlists
@@ -273,6 +254,10 @@ function loadUserPlaylists() {
         const card = document.createElement('div');
         card.className = 'playlist-card';
         card.dataset.playlistId = playlist.id;
+        card.dataset.playlistName = playlist.name;
+        card.dataset.playlistTracks = playlist.tracks;
+        card.dataset.playlistOwner = playlist.owner;
+        card.dataset.playlistImage = playlist.image || '';
 
         card.innerHTML = `
           ${playlist.image ? `<img src="${playlist.image}" alt="${playlist.name}">` : '<div class="no-image">🎵</div>'}
@@ -289,10 +274,35 @@ function loadUserPlaylists() {
           // Select this one
           card.classList.add('selected');
           selectedPlaylistId = playlist.id;
+
+          // Show selected playlist display
+          const selectedDisplay = document.getElementById('selectedPlaylistDisplay');
+          const selectedImage = document.getElementById('selectedPlaylistImage');
+          const selectedName = document.getElementById('selectedPlaylistName');
+          const selectedInfo = document.getElementById('selectedPlaylistInfo');
+
+          selectedDisplay.classList.remove('hidden');
+          selectedImage.src = playlist.image || '';
+          selectedImage.style.display = playlist.image ? 'block' : 'none';
+          selectedName.textContent = playlist.name;
+          selectedInfo.textContent = `${playlist.tracks} tracks • by ${playlist.owner}`;
+
+          // Scroll to top to show selection
+          selectedDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
 
         playlistGrid.appendChild(card);
       });
+
+      // Clear selection button
+      const clearBtn = document.getElementById('clearPlaylistBtn');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+          document.querySelectorAll('.playlist-card').forEach(c => c.classList.remove('selected'));
+          document.getElementById('selectedPlaylistDisplay').classList.add('hidden');
+          selectedPlaylistId = null;
+        });
+      }
     })
     .catch(err => {
       console.error('Error loading playlists:', err);

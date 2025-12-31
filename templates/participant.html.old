@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Join - Blindtest</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    /* Mobile optimizations */
+    html,
+    body {
+      height: 100%;
+      width: 100%;
+      overflow-x: hidden;
+    }
+
+    body {
+      position: relative;
+    }
+
+    .container {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Screens should start from top */
+    .screen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      padding: 40px 20px;
+    }
+
+    /* Game screen scrollable */
+    #gameScreen {
+      overflow-y: auto;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div id="joinScreen" class="screen">
+      <h1>Join a Blindtest</h1>
+      <div class="card">
+        <label for="playerName">Your Name:</label>
+        <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+
+        <label for="roomPin">Blindtest PIN:</label>
+        <input type="text" id="roomPin" placeholder="0000" maxlength="4" pattern="[0-9]{4}">
+
+        <button id="joinRoomBtn" class="btn btn-primary">Join Blindtest</button>
+      </div>
+    </div>
+
+    <div id="waitingScreen" class="screen hidden">
+      <h1>Waiting for Host...</h1>
+      <div class="card">
+        <p>You're in room: <strong id="currentPin">----</strong></p>
+        <p>Your name: <strong id="currentName">---</strong></p>
+
+        <div id="participantsList">
+          <h3>Players in room:</h3>
+          <ul id="participants"></ul>
+        </div>
+
+        <p class="waiting-msg">Waiting for the host to start the game...</p>
+      </div>
+    </div>
+
+    <div id="gameScreen" class="screen hidden">
+      <div class="game-info">
+        <p>Your Score: <strong id="playerScore">0</strong></p>
+      </div>
+
+      <div class="question-container">
+        <h2>Who is the artist?</h2>
+
+        <div class="answers-grid-participant">
+          <button class="answer-btn red" data-answer="0">
+            <span class="answer-letter">A</span>
+          </button>
+          <button class="answer-btn blue" data-answer="1">
+            <span class="answer-letter">B</span>
+          </button>
+          <button class="answer-btn yellow" data-answer="2">
+            <span class="answer-letter">C</span>
+          </button>
+          <button class="answer-btn green" data-answer="3">
+            <span class="answer-letter">D</span>
+          </button>
+        </div>
+
+        <div id="answerFeedback" class="feedback hidden"></div>
+      </div>
+    </div>
+
+    <div id="endScreen" class="screen hidden">
+      <h1>🏆 Game Over!</h1>
+      <div class="card">
+        <h2>Your Score: <span id="finalScore">0</span></h2>
+        <h3>Final Rankings:</h3>
+        <div id="finalScores"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='js/participant.js') }}"></script>
+</body>
+
+</html>

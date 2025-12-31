@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MusicQuiz - Blindtest</title>
+  <title>Host - MusicQuiz Blindtest</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -33,24 +33,8 @@
       transform: translateY(-5px);
       box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
     }
-
-    .music-note {
-      animation: float 3s ease-in-out infinite;
-      opacity: 0.3;
-    }
-
-    @keyframes float {
-
-      0%,
-      100% {
-        transform: translateY(0px) rotate(0deg);
-      }
-
-      50% {
-        transform: translateY(-15px) rotate(5deg);
-      }
-    }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 
 <body class="min-h-screen" style="background-color: #fefdfe;">
@@ -122,94 +106,153 @@
   </nav>
 
   <!-- Main Content -->
-  <div class="max-w-5xl mx-auto px-6 py-12">
-    <!-- Hero Section with Banner -->
-    <div class="text-center mb-12 relative">
-      <!-- Banner Image -->
-      <div class="relative inline-block mb-8">
-        <img src="/static/assets/banner.png" alt="BlindTest Banner" class="mx-auto max-w-2xl w-full">
+  <div class="container">
+    <div id="loginScreen" class="screen hidden">
+      <h1>Spotify Authentication Required</h1>
+      <div class="card">
+        <p>To play full tracks, you need to log in with your Spotify account.</p>
+        <p><strong>Note:</strong> Spotify Premium is recommended for best experience.</p>
+        <a href="/login" class="btn btn-primary">Login with Spotify</a>
+        <button id="skipLoginBtn" class="btn btn-secondary">Skip (Use Preview URLs)</button>
       </div>
-
-      <h1 class="text-5xl font-bold text-gray-800 mb-4">Get Ready to Guess the Song!</h1>
-
-      <!-- Countdown Timer -->
-      <div class="mb-8">
-        <p class="text-gray-600 text-lg mb-2">Use your own spotify playlist or any public playlist</p>
-      </div>
-
-      <!-- Join Game Button -->
-      <!-- <button
-        class="bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white font-bold text-xl px-12 py-4 rounded-full shadow-lg hover:shadow-xl transition-all">
-        Join Game
-      </button> -->
     </div>
 
-    <!-- Action Cards -->
-    <div class="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
-      <!-- Host a Game Card (was Quick Play) -->
-      <a href="/host" class="block group">
-        <div
-          class="bg-gradient-to-br from-indigo-600 to-purple-600 rounded-3xl p-6 shadow-lg card-hover text-white relative overflow-hidden">
-          <div class="absolute top-0 right-0 opacity-10">
-            <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-              <path d="M14 6a2 2 0 012-2h2a2 2 0 012 2v8a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z" />
-            </svg>
+    <div id="createScreen" class="screen">
+      <div class="card">
+        <!-- Playlist selector (shown when authenticated) -->
+        <div id="playlistSelector" class="hidden">
+          <label>Select a Playlist:</label>
+          <div id="playlistLoading" class="loading">Loading your playlists...</div>
+          <div id="playlistGrid" class="playlist-grid"></div>
+        </div>
+
+        <!-- Manual input (shown when not authenticated or as fallback) -->
+        <div id="manualInput">
+          <label for="playlistId">Spotify Playlist ID or URL:</label>
+          <input type="text" id="playlistId" placeholder="72Jj1IPNGZVqPvlqo53rMU">
+          <small>Find the ID in the Spotify playlist URL</small>
+        </div>
+
+        <button id="createRoomBtn" class="btn btn-primary">Create Blindtest</button>
+        <div id="loginOptions" class="login-options">
+          <p>💡 <a href="/login" class="link-login">Login with Spotify</a> for full playback and access to your
+            playlists</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="waitingScreen" class="screen hidden">
+      <div class="card">
+        <div class="pin-display">
+          <p>Blindtest PIN:</p>
+          <h2 id="roomPin" class="pin">----</h2>
+        </div>
+
+        <div class="qr-code-container">
+          <p>Scan to join:</p>
+          <div id="qrcode"></div>
+          <small>Players can scan this QR code to join automatically</small>
+        </div>
+
+        <p>Or share PIN manually: <strong id="roomPinText">----</strong></p>
+
+        <div id="participantsList">
+          <h3>Participants (<span id="participantCount">0</span>):</h3>
+          <ul id="participants"></ul>
+        </div>
+
+        <div class="song-count-selector">
+          <label for="songCountSlider">Number of songs: <span id="songCountValue">10</span></label>
+          <input type="range" id="songCountSlider" min="5" max="30" value="10" step="1">
+          <small>Select between 5 and 30 songs</small>
+        </div>
+
+        <div id="generatingProgress" class="progress-container hidden">
+          <h3>Generating questions...</h3>
+          <div class="progress-bar">
+            <div id="progressBarFill" class="progress-bar-fill"></div>
           </div>
+          <p id="progressText">Preparing track 0 of <span id="progressTotalSongs">10</span></p>
+        </div>
 
-          <div class="relative">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="bg-white/20 p-2.5 rounded-xl">
-                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <span class="text-2xl font-bold">Host Game</span>
-            </div>
+        <button id="startGameBtn" class="btn btn-primary">Start Game</button>
+      </div>
+    </div>
 
-            <p class="text-white/90 text-sm mb-6">Create a room & choose playlist</p>
+    <!-- Intermediate Standings Modal -->
+    <div id="standingsModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <h1>Current Standings</h1>
+        <div class="scoreboard">
+          <h3>Leaderboard</h3>
+          <div id="intermediateScoresList"></div>
+        </div>
+        <div class="countdown-dots">
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+    </div>
 
-            <div class="text-white/70 text-sm font-semibold">
-              <span class="bg-white/10 px-3 py-1.5 rounded-full">Host & Play</span>
-            </div>
+    <div id="gameScreen" class="screen hidden">
+      <div class="game-header">
+        <h2>Song <span id="songNumber">1</span> of <span id="totalSongs">10</span></h2>
+        <div class="multiplier-display">
+          <span class="multiplier-label">Score Multiplier:</span>
+          <span class="multiplier-value" id="multiplierValue">1x</span>
+        </div>
+        <!-- <button id="nextSongBtn" class="btn btn-secondary">Next Song</button> -->
+      </div>
+
+      <div class="question-container">
+        <h3>Who is the artist?</h3>
+        <audio id="audioPlayer" controls></audio>
+        <div id="spotifyPlayerUI" class="spotify-player-ui hidden">
+          <div class="player-status">
+            <span class="status-icon">🎵</span>
+            <span id="playerTrackInfo">Playing via Spotify...</span>
           </div>
         </div>
-      </a>
 
-      <!-- Join Game Card (was 2000s Hits) -->
-      <a href="/participant" class="block group">
-        <div
-          class="bg-gradient-to-br from-cyan-500 to-teal-500 rounded-3xl p-6 shadow-lg card-hover text-white relative overflow-hidden">
-          <div class="absolute top-0 right-0 opacity-10">
-            <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z"
-                clip-rule="evenodd" />
-            </svg>
+        <div class="answers-grid">
+          <div class="answer-option red" data-color="red">
+            <span class="option-label">A</span>
+            <span class="artist-name" id="option0"></span>
           </div>
-
-          <div class="relative">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="bg-white/20 p-2.5 rounded-xl">
-                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-                </svg>
-              </div>
-              <span class="text-2xl font-bold">Join Game</span>
-            </div>
-
-            <p class="text-white/90 text-sm mb-6">Enter 4-digit PIN to play</p>
-
-            <div class="text-white/70 text-sm font-semibold">
-              <span class="bg-white/10 px-3 py-1.5 rounded-full">Join Quiz</span>
-            </div>
+          <div class="answer-option blue" data-color="blue">
+            <span class="option-label">B</span>
+            <span class="artist-name" id="option1"></span>
+          </div>
+          <div class="answer-option yellow" data-color="yellow">
+            <span class="option-label">C</span>
+            <span class="artist-name" id="option2"></span>
+          </div>
+          <div class="answer-option green" data-color="green">
+            <span class="option-label">D</span>
+            <span class="artist-name" id="option3"></span>
           </div>
         </div>
-      </a>
+      </div>
+    </div>
+
+    <div id="endScreen" class="screen hidden">
+      <h1>🏆 Game Over!</h1>
+      <div class="card">
+        <h2>Final Results</h2>
+        <div id="finalScores"></div>
+        <button id="newGameBtn" class="btn btn-primary">New Game</button>
+      </div>
     </div>
   </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script src="{{ url_for('static', filename='js/host.js') }}"></script>
 
   <script>
     // Toggle user menu
@@ -252,13 +295,6 @@
       })
       .catch(err => console.log('Not authenticated'));
   </script>
-</body>
-
-</html>
-<p class="text-white text-sm font-medium">Leaderboard</p>
-</div>
-</div>
-</div>
 </body>
 
 </html>

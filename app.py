@@ -6,6 +6,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
+import spotipy
 from spotify_service import get_spotify_service
 from spotify_oauth_service import get_spotify_oauth_service
 from openai_service import get_openai_service
@@ -208,7 +209,7 @@ def callback():
     session['authenticated'] = True
     
     # Redirect back to host page
-    return redirect('/host?authenticated=true')
+    return redirect('/?authenticated=true')
 
 
 @app.route('/check_auth')
@@ -227,21 +228,39 @@ def check_auth():
         return jsonify({'authenticated': False})
 
 
+@app.route('/me')
+def get_user_profile():
+    """Get current Spotify user profile"""
+    token_info = session.get('spotify_token')
+    if not token_info:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        sp = spotipy.Spotify(auth=token_info['access_token'])
+        user_info = sp.current_user()
+        return jsonify(user_info)
+    except Exception as e:
+        print(f"Error fetching user profile: {e}")
+        return jsonify({'error': 'Failed to fetch user profile'}), 500
+
+
 @app.route('/logout')
 def logout():
     """Clear Spotify authentication and cache"""
     session.clear()
     
-    # Also clear the Spotipy cache file if it exists
-    cache_path = '.cache'
-    if os.path.exists(cache_path):
-        try:
-            os.remove(cache_path)
-            print(f"Removed cached token at {cache_path}")
-        except Exception as e:
-            print(f"Could not remove cache file: {e}")
+    # Also clear Spotipy cache files if they exist
+    # - SpotifyOAuthService uses cache_path=".spotify_cache"
+    # - Some Spotipy flows default to ".cache"
+    for cache_path in ('.spotify_cache', '.cache'):
+        if os.path.exists(cache_path):
+            try:
+                os.remove(cache_path)
+                print(f"Removed cached token at {cache_path}")
+            except Exception as e:
+                print(f"Could not remove cache file {cache_path}: {e}")
     
-    return redirect('/host')
+    return redirect('/')
 
 
 @app.route('/clear_session')
@@ -285,7 +304,7 @@ def my_playlists():
         
         # Update session with refreshed token if changed
         if refreshed_token and refreshed_token != token_info:
-            session['token_info'] = refreshed_token
+            session['spotify_token'] = refreshed_token
         
         # Get user's playlists with pagination
         playlists = []
@@ -379,8 +398,9 @@ def handle_create_room(data):
     playlist_id = data.get('playlist_id', '')
     pin = generate_pin()
     
-    # Get token info for this host if authenticated
-    token_info = spotify_tokens.get(request.sid)
+    # Get token info for this host if authenticated.
+    # Prefer the current session token (so logout/login updates take effect immediately).
+    token_info = session.get('spotify_token') or spotify_tokens.get(request.sid)
     
     room = Room(pin, request.sid, playlist_id, token_info)
     rooms[pin] = room
