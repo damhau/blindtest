@@ -658,6 +658,11 @@ def handle_start_game(data):
         # Update room token if refreshed
         if refreshed_token:
             room.token_info = refreshed_token
+            # Send refreshed token to host for Web Playback SDK
+            emit('token_refreshed', {
+                'access_token': refreshed_token['access_token'],
+                'expires_at': refreshed_token.get('expires_at', 0)
+            }, to=room.host_sid)
         
         # Fetch larger pool (200 tracks) from random offset for better variety
         tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=200, fetch_pool_size=200)
@@ -707,7 +712,7 @@ def handle_start_game(data):
     print(f"Generating {total_tracks} questions for {games_count} game(s) of {song_count} songs each")
     
     for idx, track in enumerate(tracks, 1):
-        # Emit progress update
+        # Emit progress update to entire room (host AND participants)
         socketio.emit('question_progress', {
             'current': idx,
             'total': total_tracks

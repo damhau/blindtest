@@ -102,6 +102,60 @@
     * {
       touch-action: manipulation;
     }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .loading-overlay.show {
+      opacity: 1;
+    }
+
+    .loading-spinner {
+      width: 60px;
+      height: 60px;
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* Pulse animation */
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    .animate-pulse {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
   </style>
 </head>
 
@@ -132,6 +186,17 @@
       </div>
     </div>
   </nav>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="bg-white rounded-2xl p-8 max-w-sm mx-4 shadow-2xl">
+      <div class="text-center">
+        <div class="loading-spinner mx-auto mb-4"></div>
+        <h3 id="loadingTitle" class="text-xl font-bold text-gray-800 mb-2">Loading...</h3>
+        <p id="loadingMessage" class="text-gray-600">Please wait</p>
+      </div>
+    </div>
+  </div>
 
   <!-- Main Content -->
   <div class="max-w-2xl mx-auto px-6 py-12">
@@ -189,6 +254,21 @@
 
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
           <p class="text-blue-800 font-medium">Waiting for the host to start the game...</p>
+        </div>
+
+        <!-- Game Preparation Progress -->
+        <div id="gamePreparationProgress" class="bg-white rounded-2xl shadow-lg p-6 hidden">
+          <div class="text-center mb-4">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-500 mb-3"></div>
+            <h3 class="text-lg font-bold text-gray-800 mb-2">🎵 Preparing Your Game</h3>
+            <p id="prepProgressText" class="text-sm text-gray-600 mb-4">Setting up...</p>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+            <div id="prepProgressBar"
+              class="bg-gradient-to-r from-cyan-500 to-teal-500 h-3 rounded-full transition-all duration-300"
+              style="width: 0%"></div>
+          </div>
+          <p id="prepProgressDetails" class="text-xs text-gray-500 text-center mt-2"></p>
         </div>
       </div>
     </div>

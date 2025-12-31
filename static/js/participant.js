@@ -35,6 +35,32 @@ const scoresList = document.getElementById('scoresList');
 const finalScore = document.getElementById('finalScore');
 const finalScores = document.getElementById('finalScores');
 
+// Loading overlay elements
+const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingTitle = document.getElementById('loadingTitle');
+const loadingMessage = document.getElementById('loadingMessage');
+
+// Loading state management
+function showLoading(title = 'Loading...', message = 'Please wait') {
+  if (loadingOverlay) {
+    loadingTitle.textContent = title;
+    loadingMessage.textContent = message;
+    loadingOverlay.classList.remove('hidden');
+    // Trigger reflow for animation
+    loadingOverlay.offsetHeight;
+    loadingOverlay.classList.add('show');
+  }
+}
+
+function hideLoading() {
+  if (loadingOverlay) {
+    loadingOverlay.classList.remove('show');
+    setTimeout(() => {
+      loadingOverlay.classList.add('hidden');
+    }, 300);
+  }
+}
+
 // Cookie helper functions
 function setCookie(name, value, days = 365) {
   const date = new Date();
@@ -100,6 +126,10 @@ joinRoomBtn.addEventListener('click', () => {
   // Save name to cookie
   setCookie('playerName', name);
 
+  // Show loading state
+  showLoading('Joining Game', `Connecting to room ${pin}...`);
+  joinRoomBtn.disabled = true;
+
   socket.emit('join_room', { name, pin });
 });
 
@@ -130,6 +160,9 @@ socket.on('connected', (data) => {
 });
 
 socket.on('room_joined', (data) => {
+  hideLoading();
+  joinRoomBtn.disabled = false;
+
   currentPin = data.pin;
   currentName = data.name;
 
@@ -138,6 +171,42 @@ socket.on('room_joined', (data) => {
 
   updateWaitingParticipants(data.participants);
   showScreen(waitingScreen);
+});
+
+socket.on('question_progress', (data) => {
+  // Show progress when game preparation starts
+  const progressContainer = document.getElementById('gamePreparationProgress');
+  const progressBar = document.getElementById('prepProgressBar');
+  const progressText = document.getElementById('prepProgressText');
+  const progressDetails = document.getElementById('prepProgressDetails');
+
+  if (progressContainer && progressBar && progressText) {
+    // Show progress container
+    progressContainer.classList.remove('hidden');
+
+    // Hide the "Waiting for Host..." header when progress starts
+    const waitingHeader = document.querySelector('#waitingScreen .text-center.mb-8');
+    if (waitingHeader) {
+      waitingHeader.classList.add('hidden');
+    }
+
+    // Hide the "Waiting for the host to start the game..." message
+    const waitingMessage = document.querySelector('#waitingScreen .bg-blue-50');
+    if (waitingMessage) {
+      waitingMessage.classList.add('hidden');
+    }
+
+    // Calculate percentage
+    const percentage = (data.current / data.total) * 100;
+    progressBar.style.width = percentage + '%';
+
+    // Update text
+    progressText.textContent = `Preparing track ${data.current} of ${data.total}...`;
+
+    if (progressDetails) {
+      progressDetails.textContent = `Building your perfect music quiz! 🎶`;
+    }
+  }
 });
 
 socket.on('participant_joined', (data) => {
@@ -179,6 +248,7 @@ socket.on('game_started', (data) => {
     }
   }
 
+  // Go directly to game screen
   showScreen(gameScreen);
 });
 
@@ -299,6 +369,8 @@ socket.on('series_ended', (data) => {
 });
 
 socket.on('error', (data) => {
+  hideLoading();
+  joinRoomBtn.disabled = false;
   showErrorModal('Error', data.message);
 });
 
