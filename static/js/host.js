@@ -121,7 +121,7 @@ function initializeSpotifyPlayer() {
 
   spotifyPlayer.addListener('account_error', ({ message }) => {
     console.error('Account Error:', message);
-    alert('Spotify Premium is required for playback. Falling back to preview mode.');
+    showErrorModal('Spotify Premium Required', 'Spotify Premium is required for full playback. Falling back to preview mode.');
   });
 
   spotifyPlayer.addListener('playback_error', ({ message }) => {
@@ -395,7 +395,7 @@ createRoomBtn.addEventListener('click', () => {
   }
 
   if (!playlistId) {
-    alert('Please select a playlist or enter a Spotify playlist ID/URL');
+    showErrorModal('Playlist Required', 'Please select a playlist from the list or enter a Spotify playlist ID/URL.');
     return;
   }
 
@@ -626,12 +626,14 @@ socket.on('game_ended', (data) => {
 });
 
 socket.on('error', (data) => {
-  alert('Error: ' + data.message);
+  showErrorModal('Error', data.message);
 });
 
 socket.on('room_closed', (data) => {
-  alert(data.message);
-  location.href = '/';
+  showErrorModal('Room Closed', data.message);
+  setTimeout(() => {
+    location.href = '/';
+  }, 3000);
 });
 
 // Helper Functions
@@ -1151,4 +1153,35 @@ function stopQuestionTimer() {
     timeRemaining.textContent = '0s';
   }
 }
+
+// Error Modal Functions
+function showErrorModal(title, message) {
+  const modal = document.getElementById('errorModal');
+  const modalTitle = document.getElementById('errorModalTitle');
+  const modalMessage = document.getElementById('errorModalMessage');
+
+  if (modal && modalTitle && modalMessage) {
+    modalTitle.textContent = title;
+    modalMessage.textContent = message;
+    modal.classList.remove('hidden');
+
+    // Prevent body scroll when modal is open
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function closeErrorModal() {
+  const modal = document.getElementById('errorModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeErrorModal();
+  }
+});
 

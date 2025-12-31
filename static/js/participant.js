@@ -83,12 +83,12 @@ joinRoomBtn.addEventListener('click', () => {
   const pin = roomPinInput.value.trim();
 
   if (!name) {
-    alert('Please enter your name');
+    showErrorModal('Name Required', 'Please enter your name to join the game.');
     return;
   }
 
   if (!pin || pin.length !== 4) {
-    alert('Please enter a valid 4-digit PIN');
+    showErrorModal('Invalid PIN', 'Please enter a valid 4-digit room PIN.');
     return;
   }
 
@@ -255,12 +255,47 @@ socket.on('game_ended', (data) => {
 });
 
 socket.on('error', (data) => {
-  alert('Error: ' + data.message);
+  showErrorModal('Error', data.message);
+});
+
+// Error Modal Functions
+function showErrorModal(title, message) {
+  const modal = document.getElementById('errorModal');
+  const modalTitle = document.getElementById('errorModalTitle');
+  const modalMessage = document.getElementById('errorModalMessage');
+
+  if (modal && modalTitle && modalMessage) {
+    modalTitle.textContent = title;
+    modalMessage.textContent = message;
+    modal.classList.remove('hidden');
+
+    // Prevent body scroll when modal is open
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function closeErrorModal() {
+  const modal = document.getElementById('errorModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeErrorModal();
+  }
 });
 
 socket.on('room_closed', (data) => {
-  alert('Room closed: ' + data.message);
-  location.href = '/';
+  showErrorModal('Room Closed', data.message);
+
+  // Redirect to home after modal is closed
+  setTimeout(() => {
+    location.href = '/';
+  }, 3000);
 });
 
 // Helper Functions

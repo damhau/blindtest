@@ -13,3 +13,4 @@ venv/
 .idea/
 .python-version
 .spotify_cache
+.cache
