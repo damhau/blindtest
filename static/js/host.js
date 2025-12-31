@@ -520,7 +520,7 @@ socket.on('participant_left', (data) => {
 socket.on('token_refreshed', (data) => {
   console.log('Received refreshed Spotify token');
   spotifyAccessToken = data.access_token;
-  
+
   // No need to reinitialize - the player's getOAuthToken callback
   // will automatically use the updated spotifyAccessToken
   console.log('Token updated - player will use new token automatically');
