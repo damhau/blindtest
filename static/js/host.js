@@ -15,6 +15,7 @@ let deviceId = null;
 const loginScreen = document.getElementById('loginScreen');
 const createScreen = document.getElementById('createScreen');
 const waitingScreen = document.getElementById('waitingScreen');
+const standingsModal = document.getElementById('standingsModal');
 const gameScreen = document.getElementById('gameScreen');
 const endScreen = document.getElementById('endScreen');
 const authStatus = document.getElementById('authStatus');
@@ -29,9 +30,11 @@ const startGameBtn = document.getElementById('startGameBtn');
 
 const songNumber = document.getElementById('songNumber');
 const totalSongs = document.getElementById('totalSongs');
+const multiplierValue = document.getElementById('multiplierValue');
 const audioPlayer = document.getElementById('audioPlayer');
 const nextSongBtn = document.getElementById('nextSongBtn');
 const scoresList = document.getElementById('scoresList');
+const intermediateScoresList = document.getElementById('intermediateScoresList');
 const finalScores = document.getElementById('finalScores');
 const newGameBtn = document.getElementById('newGameBtn');
 const playlistSelector = document.getElementById('playlistSelector');
@@ -243,9 +246,9 @@ window.addEventListener('load', () => {
 function loadUserPlaylists() {
   if (!playlistSelector || !playlistGrid) return;
 
-  // Show playlist selector, hide manual input
+  // Show playlist selector, keep manual input visible too
   playlistSelector.classList.remove('hidden');
-  manualInput.classList.add('hidden');
+  manualInput.classList.remove('hidden');
 
   fetch('/my_playlists')
     .then(res => res.json())
@@ -349,12 +352,14 @@ startGameBtn.addEventListener('click', () => {
   socket.emit('start_game', { pin: currentPin, song_count: songCount });
 });
 
-// Next Song
-nextSongBtn.addEventListener('click', () => {
-  if (!currentPin) return;
+// Next Song (button currently commented out in HTML)
+if (nextSongBtn) {
+  nextSongBtn.addEventListener('click', () => {
+    if (!currentPin) return;
 
-  socket.emit('next_question', { pin: currentPin });
-});
+    socket.emit('next_question', { pin: currentPin });
+  });
+}
 
 // New Game
 newGameBtn.addEventListener('click', () => {
@@ -390,6 +395,26 @@ socket.on('room_created', (data) => {
   currentPin = data.pin;
   roomPinDisplay.textContent = data.pin;
 
+  const roomPinText = document.getElementById('roomPinText');
+  if (roomPinText) {
+    roomPinText.textContent = data.pin;
+  }
+
+  // Generate QR code for participants to join
+  const qrcodeContainer = document.getElementById('qrcode');
+  if (qrcodeContainer) {
+    qrcodeContainer.innerHTML = ''; // Clear any existing QR code
+    const participantUrl = `${window.location.origin}/participant?pin=${data.pin}`;
+    new QRCode(qrcodeContainer, {
+      text: participantUrl,
+      width: 200,
+      height: 200,
+      colorDark: '#667eea',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }
+
   showScreen(waitingScreen);
 });
 
@@ -415,6 +440,15 @@ socket.on('game_started', (data) => {
 });
 
 socket.on('new_question', (data) => {
+  // Hide standings modal if showing
+  if (standingsModal && !standingsModal.classList.contains('hidden')) {
+    standingsModal.classList.add('hidden');
+    
+    // Reset countdown dots
+    const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
+    dots.forEach(dot => dot.classList.remove('active'));
+  }
+
   currentQuestion = data;
   displayQuestion(data);
 });
@@ -427,7 +461,49 @@ socket.on('show_correct_answer', (data) => {
   highlightCorrectAnswer(data.correct_answer);
 });
 
+socket.on('show_intermediate_scores', (data) => {
+  // Highlight correct answer immediately
+  if (currentQuestion && currentQuestion.correct_answer !== undefined) {
+    highlightCorrectAnswer(currentQuestion.correct_answer);
+  }
+
+  // Update intermediate scoreboard
+  updateIntermediateScoreboard(data.scores);
+
+  // Wait 3 seconds with greyed out wrong answers, then show modal
+  setTimeout(() => {
+    if (standingsModal) {
+      standingsModal.classList.remove('hidden');
+
+      // Animate countdown dots
+      const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
+      dots.forEach((dot, index) => {
+        setTimeout(() => {
+          dot.classList.add('active');
+        }, index * 1000); // Show one dot per second
+      });
+    }
+  }, 3000);
+
+  // Auto-advance after 8 seconds total (3 seconds viewing answers + 5 seconds viewing scores)
+  setTimeout(() => {
+    socket.emit('next_question', { pin: currentPin });
+  }, 8000);
+});
+
 socket.on('game_ended', (data) => {
+  // Hide standings modal if showing
+  if (standingsModal && !standingsModal.classList.contains('hidden')) {
+    standingsModal.classList.add('hidden');
+  }
+
+  // Stop music/audio playback
+  if (spotifyPlayer && deviceId) {
+    spotifyPlayer.pause();
+  } else if (audioPlayer) {
+    audioPlayer.pause();
+  }
+
   displayFinalScores(data.final_scores);
   showScreen(endScreen);
 });
@@ -474,6 +550,18 @@ function displayQuestion(data) {
 
   songNumber.textContent = data.question_number;
   totalSongs.textContent = data.total_questions;
+
+  // Update multiplier display
+  if (multiplierValue && data.multiplier) {
+    multiplierValue.textContent = data.multiplier + 'x';
+    // Add visual emphasis for higher multipliers
+    multiplierValue.className = 'multiplier-value';
+    if (data.multiplier >= 4) {
+      multiplierValue.classList.add('multiplier-4x');
+    } else if (data.multiplier >= 2) {
+      multiplierValue.classList.add('multiplier-2x');
+    }
+  }
 
   const spotifyPlayerUI = document.getElementById('spotifyPlayerUI');
 
@@ -544,7 +632,7 @@ function displayQuestion(data) {
 
   // Reset answer highlights
   document.querySelectorAll('.answer-option').forEach(opt => {
-    opt.classList.remove('correct');
+    opt.classList.remove('correct', 'incorrect');
   });
 }
 
@@ -556,14 +644,23 @@ function highlightCorrectAnswer(correctIndex) {
     audioPlayer.pause();
   }
 
-  // Highlight correct answer
-  const correctOption = document.querySelector(`.answer-option:nth-child(${correctIndex + 1})`);
-  if (correctOption) {
-    correctOption.classList.add('correct');
-  }
+  // Grey out wrong answers and highlight correct one
+  const allOptions = document.querySelectorAll('.answer-option');
+  allOptions.forEach((option, index) => {
+    if (index === correctIndex) {
+      option.classList.add('correct');
+    } else {
+      option.classList.add('incorrect');
+    }
+  });
 }
 
 function updateScoreboard(scores) {
+  // Safety check - scoreboard element was removed from game screen
+  if (!scoresList) {
+    return;
+  }
+
   scoresList.innerHTML = '';
 
   scores.forEach((player, index) => {
@@ -580,6 +677,26 @@ function updateScoreboard(scores) {
         `;
 
     scoresList.appendChild(div);
+  });
+}
+
+function updateIntermediateScoreboard(scores) {
+  intermediateScoresList.innerHTML = '';
+
+  scores.forEach((player, index) => {
+    const div = document.createElement('div');
+    div.className = 'score-item';
+
+    if (index === 0) div.classList.add('first');
+    else if (index === 1) div.classList.add('second');
+    else if (index === 2) div.classList.add('third');
+
+    div.innerHTML = `
+            <span>${index + 1}. ${player.name}</span>
+            <span>${player.score} pts</span>
+        `;
+
+    intermediateScoresList.appendChild(div);
   });
 }
 

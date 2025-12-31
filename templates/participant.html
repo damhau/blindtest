@@ -3,23 +3,59 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Join - Blindtest</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    /* Mobile optimizations */
+    html,
+    body {
+      height: 100%;
+      width: 100%;
+      overflow-x: hidden;
+    }
+
+    body {
+      position: relative;
+    }
+
+    .container {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Screens should start from top */
+    .screen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      padding: 40px 20px;
+    }
+
+    /* Game screen scrollable */
+    #gameScreen {
+      overflow-y: auto;
+    }
+  </style>
 </head>
 
 <body>
   <div class="container">
     <div id="joinScreen" class="screen">
-      <h1>Join a Room</h1>
+      <h1>Join a Blindtest</h1>
       <div class="card">
         <label for="playerName">Your Name:</label>
         <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
 
-        <label for="roomPin">Room PIN:</label>
+        <label for="roomPin">Blindtest PIN:</label>
         <input type="text" id="roomPin" placeholder="0000" maxlength="4" pattern="[0-9]{4}">
 
-        <button id="joinRoomBtn" class="btn btn-primary">Join Room</button>
+        <button id="joinRoomBtn" class="btn btn-primary">Join Blindtest</button>
       </div>
     </div>
 
@@ -48,25 +84,20 @@
 
         <div class="answers-grid-participant">
           <button class="answer-btn red" data-answer="0">
-
+            <span class="answer-letter">A</span>
           </button>
           <button class="answer-btn blue" data-answer="1">
-
+            <span class="answer-letter">B</span>
           </button>
           <button class="answer-btn yellow" data-answer="2">
-
+            <span class="answer-letter">C</span>
           </button>
           <button class="answer-btn green" data-answer="3">
-
+            <span class="answer-letter">D</span>
           </button>
         </div>
 
         <div id="answerFeedback" class="feedback hidden"></div>
-      </div>
-
-      <div class="scoreboard-mini">
-        <h3>Leaderboard</h3>
-        <div id="scoresList"></div>
       </div>
     </div>
 

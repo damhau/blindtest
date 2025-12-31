@@ -31,6 +31,50 @@ const scoresList = document.getElementById('scoresList');
 const finalScore = document.getElementById('finalScore');
 const finalScores = document.getElementById('finalScores');
 
+// Cookie helper functions
+function setCookie(name, value, days = 365) {
+  const date = new Date();
+  date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+  const expires = "expires=" + date.toUTCString();
+  document.cookie = name + "=" + value + ";" + expires + ";path=/";
+}
+
+function getCookie(name) {
+  const nameEQ = name + "=";
+  const ca = document.cookie.split(';');
+  for (let i = 0; i < ca.length; i++) {
+    let c = ca[i];
+    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+  }
+  return null;
+}
+
+// Check for PIN in URL parameters and load saved name
+window.addEventListener('load', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const pinFromUrl = urlParams.get('pin');
+
+  // Load saved name from cookie
+  const savedName = getCookie('playerName');
+  if (savedName) {
+    playerNameInput.value = savedName;
+  }
+
+  if (pinFromUrl && pinFromUrl.length === 4) {
+    roomPinInput.value = pinFromUrl;
+    // Focus on name input for convenience (or join button if name is filled)
+    if (savedName) {
+      joinRoomBtn.focus();
+    } else {
+      playerNameInput.focus();
+    }
+  } else if (savedName) {
+    // If name is saved but no PIN, focus on PIN input
+    roomPinInput.focus();
+  }
+});
+
 // Join Room
 joinRoomBtn.addEventListener('click', () => {
   const name = playerNameInput.value.trim();
@@ -48,6 +92,9 @@ joinRoomBtn.addEventListener('click', () => {
 
   currentName = name;
   currentPin = pin;
+
+  // Save name to cookie
+  setCookie('playerName', name);
 
   socket.emit('join_room', { name, pin });
 });
@@ -116,17 +163,7 @@ socket.on('new_question_participant', (data) => {
 socket.on('answer_feedback', (data) => {
   playerScore.textContent = data.your_score;
 
-  // Show feedback
-  answerFeedback.classList.remove('hidden');
-  answerFeedback.className = 'feedback';
-
-  if (data.correct) {
-    answerFeedback.classList.add('correct');
-    answerFeedback.textContent = '✓ Correct! +1 point';
-  } else {
-    answerFeedback.classList.add('incorrect');
-    answerFeedback.textContent = '✗ Wrong answer';
-  }
+  // Don't show feedback message - just update score silently
 });
 
 socket.on('scores_updated', (data) => {

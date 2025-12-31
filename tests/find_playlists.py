@@ -20,7 +20,7 @@ def find_playlists():
     print()
     
     # Search for popular playlists
-    results = sp.search(q='rock', type='playlist', limit=10)
+    results = sp.search(q='rock', type='playlist', limit=100)
     
     print(f"Found {len(results['playlists']['items'])} playlists:\n")
     

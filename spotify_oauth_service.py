@@ -49,15 +49,58 @@ class SpotifyOAuthService:
             return None
     
     def get_spotify_client(self, token_info):
-        """Create authenticated Spotify client"""
+        """Create authenticated Spotify client and return (client, refreshed_token_info)"""
         if not token_info:
-            return None
+            return None, None
         
         # Check if token needs refresh
         if self.sp_oauth.is_token_expired(token_info):
+            print("Token expired, refreshing...")
             token_info = self.sp_oauth.refresh_access_token(token_info['refresh_token'])
         
-        return spotipy.Spotify(auth=token_info['access_token'])
+        client = spotipy.Spotify(auth=token_info['access_token'])
+        return client, token_info
+    
+    def get_liked_songs_tracks(self, sp_client, limit=50):
+        """
+        Fetch tracks from user's Liked Songs collection
+        Returns tuple: (tracks_list, error_message)
+        """
+        try:
+            results = sp_client.current_user_saved_tracks(limit=limit)
+            tracks = []
+            
+            for item in results['items']:
+                track = item['track']
+                if not track:
+                    continue
+                
+                artists = track['artists']
+                if not artists:
+                    continue
+                
+                main_artist = artists[0]['name']
+                
+                track_data = {
+                    'name': track['name'],
+                    'artist': main_artist,
+                    'uri': track['uri'],
+                    'preview_url': track.get('preview_url'),
+                    'album': track['album']['name'],
+                    'cover_url': track['album']['images'][0]['url'] if track['album']['images'] else None,
+                    'duration': track['duration_ms']
+                }
+                
+                tracks.append(track_data)
+            
+            if not tracks:
+                return [], "No liked songs found."
+            
+            return tracks, None
+        
+        except Exception as e:
+            print(f"Error fetching liked songs: {e}")
+            return [], f"Error fetching liked songs: {str(e)}"
     
     def extract_playlist_id(self, playlist_input):
         """Extract playlist ID from URL or return ID if already provided"""
@@ -73,12 +116,23 @@ class SpotifyOAuthService:
         Returns tuple: (tracks_list, error_message)
         """
         try:
+            # Handle special "Liked Songs" collection
+            if playlist_id == 'liked-songs':
+                return self.get_liked_songs_tracks(sp_client, limit)
+            
             playlist_id = self.extract_playlist_id(playlist_id)
             
             if not playlist_id or len(playlist_id) < 10:
                 return [], "Invalid playlist ID format"
             
-            results = sp_client.playlist_tracks(playlist_id, limit=limit)
+            # Get current user's market for better track availability
+            try:
+                user_profile = sp_client.current_user()
+                market = user_profile.get('country', 'US')
+            except:
+                market = 'US'
+            
+            results = sp_client.playlist_tracks(playlist_id, limit=limit, market=market)
             tracks = []
             
             for item in results['items']:

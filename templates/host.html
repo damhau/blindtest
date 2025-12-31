@@ -21,7 +21,7 @@
     </div>
 
     <div id="createScreen" class="screen">
-      <h1>Create a Room</h1>
+      <h1>Create a Blindtest</h1>
       <div class="card">
         <div id="authStatus" class="auth-status-container hidden">
           <p class="auth-badge">✓ Logged in with Spotify - Full playback enabled</p>
@@ -42,7 +42,7 @@
           <small>Find the ID in the Spotify playlist URL</small>
         </div>
 
-        <button id="createRoomBtn" class="btn btn-primary">Create Room</button>
+        <button id="createRoomBtn" class="btn btn-primary">Create Blindtest</button>
         <div class="login-options">
           <p>Or <a href="/login" class="link-login">login with Spotify</a> for full playback</p>
         </div>
@@ -50,13 +50,20 @@
     </div>
 
     <div id="waitingScreen" class="screen hidden">
-      <h1>Room Created!</h1>
+      <h1>Blindtest Created!</h1>
       <div class="card">
         <div class="pin-display">
-          <p>Room PIN:</p>
+          <p>Blindtest PIN:</p>
           <h2 id="roomPin" class="pin">----</h2>
         </div>
-        <p>Share this PIN with players</p>
+
+        <div class="qr-code-container">
+          <p>Scan to join:</p>
+          <div id="qrcode"></div>
+          <small>Players can scan this QR code to join automatically</small>
+        </div>
+
+        <p>Or share PIN manually: <strong id="roomPinText">----</strong></p>
 
         <div id="participantsList">
           <h3>Participants (<span id="participantCount">0</span>):</h3>
@@ -81,10 +88,33 @@
       </div>
     </div>
 
+    <!-- Intermediate Standings Modal -->
+    <div id="standingsModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <h1>Current Standings</h1>
+        <div class="scoreboard">
+          <h3>Leaderboard</h3>
+          <div id="intermediateScoresList"></div>
+        </div>
+        <div class="countdown-dots">
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+    </div>
+
     <div id="gameScreen" class="screen hidden">
       <div class="game-header">
         <h2>Song <span id="songNumber">1</span> of <span id="totalSongs">10</span></h2>
-        <button id="nextSongBtn" class="btn btn-secondary">Next Song</button>
+        <div class="multiplier-display">
+          <span class="multiplier-label">Score Multiplier:</span>
+          <span class="multiplier-value" id="multiplierValue">1x</span>
+        </div>
+        <!-- <button id="nextSongBtn" class="btn btn-secondary">Next Song</button> -->
       </div>
 
       <div class="question-container">
@@ -116,11 +146,6 @@
           </div>
         </div>
       </div>
-
-      <div class="scoreboard">
-        <h3>Scoreboard</h3>
-        <div id="scoresList"></div>
-      </div>
     </div>
 
     <div id="endScreen" class="screen hidden">
@@ -134,6 +159,7 @@
   </div>
 
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script src="{{ url_for('static', filename='js/host.js') }}"></script>
 </body>

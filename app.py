@@ -66,13 +66,69 @@ class Room:
     def record_answer(self, sid, answer):
         if self.question_index not in self.answers:
             self.answers[self.question_index] = {}
-        self.answers[self.question_index][sid] = answer
+        # Store answer with timestamp
+        self.answers[self.question_index][sid] = {
+            'answer': answer,
+            'timestamp': datetime.now()
+        }
 
     def check_answer(self, sid, answer):
         if self.current_question and answer == self.current_question['correct_answer']:
-            self.participants[sid]['score'] += 1
+            # Calculate points based on speed ranking
+            base_points = self.calculate_speed_points(sid)
+            # Apply multiplier based on song progression
+            multiplier = self.get_score_multiplier()
+            points = base_points * multiplier
+            self.participants[sid]['score'] += points
             return True
         return False
+    
+    def get_score_multiplier(self):
+        """Calculate score multiplier based on song progression
+        - First ~50% of songs: 1x
+        - Next ~30% of songs: 2x
+        - Last ~20% of songs: 4x
+        """
+        total_songs = len(self.questions)
+        current_song = self.question_index + 1  # 1-indexed
+        
+        # Calculate thresholds
+        threshold_2x = int(total_songs * 0.5)  # After 50%
+        threshold_4x = int(total_songs * 0.8)  # After 80%
+        
+        if current_song <= threshold_2x:
+            return 1
+        elif current_song <= threshold_4x:
+            return 2
+        else:
+            return 4
+    
+    def calculate_speed_points(self, sid):
+        """Calculate points based on answer speed ranking among correct answers"""
+        current_answers = self.answers.get(self.question_index, {})
+        correct_answer_index = self.current_question['correct_answer']
+        
+        # Get all correct answers with timestamps
+        correct_answers = []
+        for player_sid, answer_data in current_answers.items():
+            if answer_data['answer'] == correct_answer_index:
+                correct_answers.append({
+                    'sid': player_sid,
+                    'timestamp': answer_data['timestamp']
+                })
+        
+        # Sort by timestamp (fastest first)
+        correct_answers.sort(key=lambda x: x['timestamp'])
+        
+        # Find rank of current player (1-indexed)
+        rank = next((i + 1 for i, a in enumerate(correct_answers) if a['sid'] == sid), 1)
+        
+        # Calculate points: 100 for 1st, halved for each subsequent rank, minimum 10
+        base_score = 100
+        min_score = 10
+        points = base_score / (2 ** (rank - 1))
+        
+        return max(min_score, round(points))
     
     def generate_question(self, track, fake_artists):
         """Generate a question with correct answer and 3 fake options"""
@@ -223,24 +279,56 @@ def my_playlists():
         return jsonify({'error': 'Not authenticated'}), 401
     
     try:
-        sp_client = spotify_oauth_service.get_spotify_client(token_info)
+        sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(token_info)
         if not sp_client:
             return jsonify({'error': 'Authentication expired'}), 401
         
-        # Get user's playlists
+        # Update session with refreshed token if changed
+        if refreshed_token and refreshed_token != token_info:
+            session['token_info'] = refreshed_token
+        
+        # Get user's playlists with pagination
         playlists = []
+        
+        # First, add "Liked Songs" as a special collection
+        try:
+            saved_tracks = sp_client.current_user_saved_tracks(limit=1)
+            if saved_tracks and saved_tracks['total'] > 0:
+                playlists.append({
+                    'id': 'liked-songs',  # Special ID for liked songs
+                    'name': 'Liked Songs',
+                    'tracks': saved_tracks['total'],
+                    'image': 'https://misc.scdn.co/liked-songs/liked-songs-640.png',  # Spotify's liked songs icon
+                    'owner': 'You'
+                })
+        except Exception as e:
+            print(f"Could not fetch liked songs: {e}")
+        
+        # Then get all playlists
         results = sp_client.current_user_playlists(limit=50)
         
-        for playlist in results['items']:
-            if playlist:
-                playlists.append({
-                    'id': playlist['id'],
-                    'name': playlist['name'],
-                    'tracks': playlist['tracks']['total'],
-                    'image': playlist['images'][0]['url'] if playlist['images'] else None,
-                    'owner': playlist['owner']['display_name']
-                })
+        while results:
+            for playlist in results['items']:
+                if playlist:
+                    playlist_name = playlist['name']
+                    print(f"Found playlist: {playlist_name} by {playlist['owner']['display_name']}")
+                    playlists.append({
+                        'id': playlist['id'],
+                        'name': playlist_name,
+                        'tracks': playlist['tracks']['total'],
+                        'image': playlist['images'][0]['url'] if playlist['images'] else None,
+                        'owner': playlist['owner']['display_name']
+                    })
+            
+            # Check if there are more playlists to fetch
+            if results['next']:
+                print(f"Fetching next page of playlists...")
+                results = sp_client.next(results)
+            else:
+                break
         
+        print(f"Loaded {len(playlists)} playlists for user (including Liked Songs)")
+        print(f"Playlist names: {[p['name'] for p in playlists]}")
         return jsonify({'playlists': playlists})
     
     except Exception as e:
@@ -350,6 +438,8 @@ def handle_start_game(data):
     
     # Validate song count
     song_count = max(5, min(30, song_count))  # Clamp between 5 and 30
+
+    print(f'Starting game in room {pin} with {song_count} songs')
     
     if pin not in rooms:
         emit('error', {'message': 'Room not found'})
@@ -364,10 +454,14 @@ def handle_start_game(data):
     # Use OAuth service if host is authenticated, otherwise fall back to basic service
     if room.token_info and spotify_oauth_service:
         # Host is authenticated - use OAuth service for full playback
-        sp_client = spotify_oauth_service.get_spotify_client(room.token_info)
+        sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(room.token_info)
         if not sp_client:
             emit('error', {'message': 'Spotify authentication expired. Please log in again.'})
             return
+        
+        # Update room token if refreshed
+        if refreshed_token:
+            room.token_info = refreshed_token
         
         # Fetch more tracks than needed to randomize from
         tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=50)
@@ -423,7 +517,9 @@ def handle_start_game(data):
             # Fallback: use similar artists from Spotify
             if room.token_info and spotify_oauth_service:
                 print(f"Using get_similar_artists to generate fake artists for track: {track['name']}")
-                sp_client = spotify_oauth_service.get_spotify_client(room.token_info)
+                sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(room.token_info)
+                if refreshed_token:
+                    room.token_info = refreshed_token
                 fake_artists = spotify_oauth_service.get_similar_artists(sp_client, track['artist'], limit=3)
             elif spotify_service:
                 print(f"Using get_similar_artists to generate fake artists")
@@ -467,7 +563,9 @@ def send_question(pin):
         'preview_url': question.get('preview_url'),
         'track_uri': question.get('track_uri'),  # For Spotify Web Playback SDK
         'options': question['options'],
+        'correct_answer': question['correct_answer'],  # Index of correct answer for debugging
         'colors': question['colors'],
+        'multiplier': room.get_score_multiplier(),  # Current score multiplier
         'has_oauth': room.token_info is not None
     }
     
@@ -514,6 +612,32 @@ def handle_submit_answer(data):
     }, room=pin)
     
     print(f'Player {room.participants[request.sid]["name"]} answered: {answer} ({"correct" if is_correct else "incorrect"})')
+    
+    # Check if all participants have answered
+    current_answers = room.answers.get(room.question_index, {})
+    if len(current_answers) == len(room.participants):
+        print(f'All {len(room.participants)} participants have answered question {room.question_index + 1}')
+        
+        # Check if this is the last question
+        is_last_question = (room.question_index + 1) >= len(room.questions)
+        
+        if is_last_question:
+            # Last question - end the game directly after showing correct answer
+            # Wait a moment for correct answer to be shown
+            def end_game_after_delay():
+                socketio.sleep(3)  # Wait 3 seconds to show correct answer
+                room.state = 'ended'
+                socketio.emit('game_ended', {
+                    'final_scores': room.get_scores()
+                }, room=pin)
+                print(f'Game ended in room {pin}')
+            
+            socketio.start_background_task(end_game_after_delay)
+        else:
+            # Show intermediate scores to host only
+            socketio.emit('show_intermediate_scores', {
+                'scores': room.get_scores()
+            }, room=pin, to=room.host_sid)
 
 
 @socketio.on('next_question')
