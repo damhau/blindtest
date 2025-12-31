@@ -139,6 +139,19 @@ function initializeSpotifyPlayer() {
     console.log('Device ID has gone offline:', device_id);
   });
 
+  // Player State Changed - detect actual playback start
+  let hasNotifiedPlaybackStart = false;
+  spotifyPlayer.addListener('player_state_changed', (state) => {
+    if (state && !state.paused && state.position === 0 && !hasNotifiedPlaybackStart) {
+      console.log('Spotify playback actually started');
+      hasNotifiedPlaybackStart = true;
+      // Notify backend that playback has actually started
+      socket.emit('playback_started', { pin: currentPin });
+      // Reset flag after a delay for next track
+      setTimeout(() => { hasNotifiedPlaybackStart = false; }, 1000);
+    }
+  });
+
   // Connect to the player
   spotifyPlayer.connect().then(success => {
     if (success) {
@@ -168,9 +181,8 @@ function playSpotifyTrack(trackUri) {
     },
   }).then(response => {
     if (response.ok) {
-      console.log('✓ Playing track via SDK:', trackUri);
-      // Notify backend that playback has started
-      socket.emit('playback_started', { pin: currentPin });
+      console.log('✓ Spotify API accepted play request:', trackUri);
+      // Note: actual playback_started will be emitted by player_state_changed listener
       return true;
     } else {
       console.log('Failed to play track:', response.status, response.statusText);
@@ -681,10 +693,22 @@ function displayQuestion(data) {
     console.log('Using preview URL');
     audioPlayer.src = data.preview_url;
     audioPlayer.load();
-    audioPlayer.play().then(() => {
+
+    // Listen for actual playback start (after buffering)
+    const onPlaying = () => {
+      console.log('HTML5 audio actually started playing');
       // Notify backend that playback has started
       socket.emit('playback_started', { pin: currentPin });
+      // Remove listener to avoid multiple triggers
+      audioPlayer.removeEventListener('playing', onPlaying);
+    };
+    audioPlayer.addEventListener('playing', onPlaying);
+
+    // Start playback
+    audioPlayer.play().catch(err => {
+      console.error('Error starting audio playback:', err);
     });
+
     audioAvailable = true;
     // Start audio visualization
     setupAudioVisualization();

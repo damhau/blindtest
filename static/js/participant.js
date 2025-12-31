@@ -226,7 +226,7 @@ socket.on('show_correct_answer', (data) => {
   if (!hasAnswered) {
     answerFeedback.classList.remove('hidden');
     answerFeedback.className = 'feedback incorrect';
-    answerFeedback.textContent = '⏱ Time\'s up!';
+    // answerFeedback.textContent = '⏱ Time\'s up!';
   }
 
   // Notify server that correct answer has been displayed
