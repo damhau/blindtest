@@ -11,6 +11,5 @@ venv/
 .DS_Store
 .vscode/
 .idea/
-uv.lock
 .python-version
 .spotify_cache
