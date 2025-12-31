@@ -43,6 +43,8 @@ class Room:
         self.questions = []
         self.state = 'waiting'  # waiting, playing, ended
         self.answers = {}  # question_index -> {sid -> answer}
+        self.voting_closed = False  # Track if current question voting is closed
+        self.correct_answer_acks = set()  # Track participants who saw the correct answer
         self.created_at = datetime.now()
         self.colors = ['red', 'blue', 'yellow', 'green']
 
@@ -597,6 +599,74 @@ def send_question(pin):
         'total_questions': len(room.questions),
         'colors': question['colors']
     }, room=pin, skip_sid=room.host_sid)
+    
+    # Don't start timer automatically - wait for playback_started event from frontend
+    room.voting_closed = False  # Reset voting flag for new question
+
+
+@socketio.on('playback_started')
+def handle_playback_started(data):
+    pin = data.get('pin')
+    
+    if pin not in rooms:
+        return
+    
+    room = rooms[pin]
+    current_question_index = room.question_index
+    
+    print(f'Playback started for question {room.question_index + 1} in room {pin}, starting timer')
+    
+    # Notify all clients to start their timers
+    socketio.emit('start_question_timer', {}, room=pin)
+    
+    # Start timer now that playback has begun
+    def question_timeout():
+        socketio.sleep(10)
+        if pin in rooms and rooms[pin].question_index == current_question_index:
+            # Time's up - close voting and notify all players
+            rooms[pin].voting_closed = True
+            rooms[pin].correct_answer_acks = set()  # Reset acknowledgments
+            socketio.emit('question_timeout', {}, room=pin)
+            print(f'Question {current_question_index + 1} timeout in room {pin}')
+            
+            # Show correct answer after timeout
+            socketio.sleep(0.5)  # Small delay before showing answer
+            socketio.emit('show_correct_answer', {
+                'correct_answer': room.current_question['correct_answer'],
+                'correct_artist': room.current_question['correct_artist']
+            }, room=pin)
+            
+            # Wait for all participants to acknowledge (max 3 seconds)
+            participant_count = len(rooms[pin].participants)
+            max_wait = 3.0  # Maximum wait time in seconds
+            wait_interval = 0.1  # Check every 100ms
+            waited = 0.0
+            
+            while waited < max_wait and len(rooms[pin].correct_answer_acks) < participant_count:
+                socketio.sleep(wait_interval)
+                waited += wait_interval
+            
+            print(f'Participants acknowledged: {len(rooms[pin].correct_answer_acks)}/{participant_count} after {waited:.1f}s')
+            
+            # Wait additional 1 second before showing standings
+            socketio.sleep(1.0)
+            
+            # Show intermediate scores to host
+            socketio.emit('show_intermediate_scores', {
+                'scores': rooms[pin].get_scores()
+            }, room=pin, to=room.host_sid)
+    
+    socketio.start_background_task(question_timeout)
+
+
+@socketio.on('correct_answer_displayed')
+def handle_correct_answer_displayed(data):
+    pin = data.get('pin')
+    sid = request.sid
+    
+    if pin in rooms and sid in rooms[pin].participants:
+        rooms[pin].correct_answer_acks.add(sid)
+        print(f'Participant {rooms[pin].participants[sid]["name"]} acknowledged correct answer in room {pin}')
 
 
 @socketio.on('submit_answer')
@@ -614,6 +684,16 @@ def handle_submit_answer(data):
         emit('error', {'message': 'You are not in this game'})
         return
     
+    # Check if voting is still open
+    if room.voting_closed:
+        emit('error', {'message': 'Voting has ended for this question'})
+        return
+    
+    # Check if player already answered this question
+    if room.question_index in room.answers and request.sid in room.answers[room.question_index]:
+        emit('error', {'message': 'You have already answered this question'})
+        return
+    
     # Record answer
     room.record_answer(request.sid, answer)
     
@@ -625,6 +705,11 @@ def handle_submit_answer(data):
         'correct': is_correct,
         'your_score': room.participants[request.sid]['score']
     })
+    
+    # Notify everyone that this player has answered
+    socketio.emit('player_answered', {
+        'player_name': room.participants[request.sid]['name']
+    }, room=pin)
     
     # Update scores for everyone
     socketio.emit('scores_updated', {

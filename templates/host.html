@@ -309,20 +309,29 @@
         <div class="bg-white rounded-2xl shadow-lg p-8 mb-6">
           <h3 class="text-2xl font-bold text-gray-800 mb-6 text-center">Who is the artist?</h3>
 
-          <!-- Audio Player -->
-          <audio id="audioPlayer" controls class="w-full mb-6 rounded-lg"></audio>
-
-          <!-- Spotify Player UI -->
-          <div id="spotifyPlayerUI"
-            class="hidden mb-6 bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg p-4 text-white">
-            <div class="flex items-center justify-center gap-3">
-              <span class="text-2xl">🎵</span>
-              <span id="playerTrackInfo" class="font-semibold">Playing via Spotify...</span>
+          <!-- Timer Progress Bar -->
+          <div class="mb-4">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-sm font-semibold text-gray-600">Time Remaining</span>
+              <span id="timeRemaining" class="text-sm font-bold text-primary">10s</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div id="timerProgress"
+                class="bg-gradient-to-r from-green-500 to-emerald-600 h-2 rounded-full transition-all duration-100"
+                style="width: 100%"></div>
             </div>
           </div>
 
+          <!-- Audio Player (hidden) -->
+          <audio id="audioPlayer" class="hidden"></audio>
+
+          <!-- Audio Visualizer -->
+          <div class="mb-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <canvas id="audioVisualizer" width="800" height="120" class="w-full rounded"></canvas>
+          </div>
+
           <!-- Answer Options Grid -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div class="answer-option bg-red-500 hover:bg-red-600 text-white p-6 rounded-xl shadow-lg" data-color="red">
               <div class="flex items-center gap-4">
                 <span
@@ -355,6 +364,12 @@
               </div>
             </div>
           </div>
+
+          <!-- Voted Participants Display -->
+          <div class="mt-4">
+            <p class="text-sm text-gray-600 mb-2 font-medium">Players who voted:</p>
+            <div id="votedParticipants" class="flex flex-wrap gap-2"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -363,6 +378,12 @@
     <div id="standingsModal" class="modal hidden">
       <div class="modal-backdrop"></div>
       <div class="modal-content">
+        <!-- Correct Answer Display -->
+        <div id="correctAnswerDisplay" class="mb-6 p-4 bg-green-50 border-2 border-green-500 rounded-xl">
+          <p class="text-sm text-green-700 font-semibold mb-2 text-center">Correct Answer</p>
+          <p id="correctAnswerText" class="text-2xl font-bold text-green-800 text-center"></p>
+        </div>
+
         <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Current Standings</h1>
         <div id="intermediateScoresList" class="space-y-3 mb-6"></div>
         <div class="flex justify-center gap-2">
@@ -390,7 +411,7 @@
       <div class="text-center">
         <button id="newGameBtn"
           class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-4 px-12 rounded-lg shadow-lg transition-all text-lg">
-          🎮 Start New Game
+          Start New Game
         </button>
       </div>
     </div>

@@ -47,6 +47,9 @@ const songCountValue = document.getElementById('songCountValue');
 
 let selectedPlaylistId = null;
 let spotifyAccessToken = null;
+let questionTimer = null;
+let questionStartTime = null;
+const QUESTION_TIME_LIMIT = 10; // seconds
 
 // Update song count display when slider changes
 if (songCountSlider && songCountValue) {
@@ -166,6 +169,8 @@ function playSpotifyTrack(trackUri) {
   }).then(response => {
     if (response.ok) {
       console.log('✓ Playing track via SDK:', trackUri);
+      // Notify backend that playback has started
+      socket.emit('playback_started', { pin: currentPin });
       return true;
     } else {
       console.log('Failed to play track:', response.status, response.statusText);
@@ -268,11 +273,36 @@ function loadUserPlaylists() {
           </div>
         `;
 
+        card.addEventListener('mousedown', (e) => {
+          card.style.transform = 'scale(0.92)';
+          card.style.boxShadow = '0 1px 4px rgba(102, 126, 234, 0.6)';
+        });
+
+        card.addEventListener('mouseup', (e) => {
+          // Don't remove effect here, let the click handler decide
+        });
+
+        card.addEventListener('mouseleave', (e) => {
+          // Only remove effect if card is not selected
+          if (!card.classList.contains('selected')) {
+            card.style.transform = '';
+            card.style.boxShadow = '';
+          }
+        });
+
         card.addEventListener('click', () => {
-          // Deselect all
-          document.querySelectorAll('.playlist-card').forEach(c => c.classList.remove('selected'));
-          // Select this one
+
+          // Remove pressed effect and selection from all cards
+          document.querySelectorAll('.playlist-card').forEach(c => {
+            c.classList.remove('selected');
+            c.style.transform = '';
+            c.style.boxShadow = '';
+          });
+
+          // Select this one and keep pressed effect
           card.classList.add('selected');
+          card.style.transform = 'scale(0.92)';
+          card.style.boxShadow = '0 1px 4px rgba(102, 126, 234, 0.6)';
           selectedPlaylistId = playlist.id;
 
           // Show selected playlist display
@@ -298,7 +328,11 @@ function loadUserPlaylists() {
       const clearBtn = document.getElementById('clearPlaylistBtn');
       if (clearBtn) {
         clearBtn.addEventListener('click', () => {
-          document.querySelectorAll('.playlist-card').forEach(c => c.classList.remove('selected'));
+          document.querySelectorAll('.playlist-card').forEach(c => {
+            c.classList.remove('selected');
+            c.style.transform = '';
+            c.style.boxShadow = '';
+          });
           document.getElementById('selectedPlaylistDisplay').classList.add('hidden');
           selectedPlaylistId = null;
         });
@@ -341,22 +375,28 @@ createRoomBtn.addEventListener('click', () => {
 startGameBtn.addEventListener('click', () => {
   if (!currentPin) return;
 
-  console.log('Start Game clicked');
+
 
   // Get song count from slider
   const songCount = songCountSlider ? parseInt(songCountSlider.value) : 10;
-  console.log('Song count selected:', songCount);
+
 
   // Disable button and show progress
   startGameBtn.disabled = true;
   startGameBtn.textContent = 'Generating questions...';
 
+  // Hide song count selector and show progress
+  const songCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#songCountSlider)');
   const progressContainer = document.getElementById('generatingProgress');
-  console.log('Progress container found:', !!progressContainer);
+
+
+  if (songCountContainer) {
+    songCountContainer.classList.add('hidden');
+  }
 
   if (progressContainer) {
     progressContainer.classList.remove('hidden');
-    console.log('Progress container shown');
+
   }
 
   socket.emit('start_game', { pin: currentPin, song_count: songCount });
@@ -382,13 +422,13 @@ socket.on('connected', (data) => {
 });
 
 socket.on('question_progress', (data) => {
-  console.log('Progress update received:', data);
+
 
   const progressBarFill = document.getElementById('progressBarFill');
   const progressText = document.getElementById('progressText');
   const progressTotalSongs = document.getElementById('progressTotalSongs');
 
-  console.log('Progress elements found:', !!progressBarFill, !!progressText);
+
 
   if (progressBarFill && progressText) {
     const percentage = (data.current / data.total) * 100;
@@ -397,7 +437,7 @@ socket.on('question_progress', (data) => {
     if (progressTotalSongs) {
       progressTotalSongs.textContent = data.total;
     }
-    console.log(`Progress: ${percentage}%`);
+
   }
 });
 
@@ -442,6 +482,13 @@ socket.on('game_started', (data) => {
   if (progressContainer) {
     progressContainer.classList.add('hidden');
   }
+
+  // Show song count selector again
+  const songCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#songCountSlider)');
+  if (songCountContainer) {
+    songCountContainer.classList.remove('hidden');
+  }
+
   startGameBtn.disabled = false;
   startGameBtn.textContent = 'Start Game';
 
@@ -461,6 +508,7 @@ socket.on('new_question', (data) => {
 
   currentQuestion = data;
   displayQuestion(data);
+  // Timer will be started when playback_started event is received
 });
 
 socket.on('scores_updated', (data) => {
@@ -468,37 +516,61 @@ socket.on('scores_updated', (data) => {
 });
 
 socket.on('show_correct_answer', (data) => {
-  highlightCorrectAnswer(data.correct_answer);
+  displayCorrectAnswer(data.correct_answer, data.correct_artist);
+});
+
+socket.on('player_answered', (data) => {
+  displayVotedParticipant(data.player_name);
+});
+
+socket.on('question_timeout', () => {
+  stopQuestionTimer();
+  console.log('Question timeout - voting ended');
+});
+
+socket.on('start_question_timer', () => {
+  console.log('Starting question timer');
+  startQuestionTimer();
 });
 
 socket.on('show_intermediate_scores', (data) => {
-  // Highlight correct answer immediately
+  // Stop the timer immediately
+  stopQuestionTimer();
+
+  // Ensure correct answer is processed
   if (currentQuestion && currentQuestion.correct_answer !== undefined) {
-    highlightCorrectAnswer(currentQuestion.correct_answer);
+    displayCorrectAnswer(currentQuestion.correct_answer);
   }
 
   // Update intermediate scoreboard
   updateIntermediateScoreboard(data.scores);
 
-  // Wait 3 seconds with greyed out wrong answers, then show modal
-  setTimeout(() => {
-    if (standingsModal) {
-      standingsModal.classList.remove('hidden');
-
-      // Animate countdown dots
-      const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
-      dots.forEach((dot, index) => {
-        setTimeout(() => {
-          dot.classList.add('active');
-        }, index * 1000); // Show one dot per second
-      });
+  // Show modal immediately with correct answer at top
+  if (standingsModal) {
+    // Display correct answer
+    const correctAnswerText = document.getElementById('correctAnswerText');
+    if (correctAnswerText && currentQuestion) {
+      const correctArtist = currentQuestion.displayedCorrectArtist ||
+        (currentQuestion.options && currentQuestion.options[currentQuestion.correct_answer]) ||
+        'Unknown';
+      correctAnswerText.textContent = correctArtist;
     }
-  }, 3000);
 
-  // Auto-advance after 8 seconds total (3 seconds viewing answers + 5 seconds viewing scores)
+    standingsModal.classList.remove('hidden');
+
+    // Animate countdown dots
+    const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
+    dots.forEach((dot, index) => {
+      setTimeout(() => {
+        dot.classList.add('active');
+      }, index * 1000); // Show one dot per second
+    });
+  }
+
+  // Auto-advance after 7 seconds
   setTimeout(() => {
     socket.emit('next_question', { pin: currentPin });
-  }, 8000);
+  }, 7000);
 });
 
 socket.on('game_ended', (data) => {
@@ -539,24 +611,42 @@ function updateParticipantsList(participants) {
   participantCount.textContent = participants.length;
   participantsList.innerHTML = '';
 
-  participants.forEach(p => {
+  // Random color palette for avatars
+  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
+
+  participants.forEach((p, index) => {
     const li = document.createElement('li');
-    li.textContent = p.name;
+    li.className = 'flex items-center gap-3 p-2 bg-gray-50 rounded-lg';
+
+    // Use random color based on player index
+    const color = colors[index % colors.length];
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name)}&backgroundColor=${color}&fontSize=40`;
+
+    li.innerHTML = `
+      <img src="${avatarUrl}" alt="${p.name}" class="w-8 h-8 rounded-full">
+      <span class="font-medium text-gray-800">${p.name}</span>
+    `;
     participantsList.appendChild(li);
   });
 }
 
 function displayQuestion(data) {
   // Debug logging
-  console.log('=== Question Data ===');
-  console.log('Track Name:', data.track_name);
-  console.log('Artist:', data.options ? data.options[data.correct_answer] : 'N/A');
-  console.log('All Options:', data.options);
-  console.log('Correct Answer Index:', data.correct_answer);
-  console.log('Track URI:', data.track_uri);
-  console.log('Preview URL:', data.preview_url);
-  console.log('Question Number:', data.question_number, '/', data.total_questions);
-  console.log('====================');
+  // console.log('=== Question Data ===');
+  // console.log('Track Name:', data.track_name);
+  // console.log('Artist:', data.options ? data.options[data.correct_answer] : 'N/A');
+  // console.log('All Options:', data.options);
+  // console.log('Correct Answer Index:', data.correct_answer);
+  // console.log('Track URI:', data.track_uri);
+  // console.log('Preview URL:', data.preview_url);
+  // console.log('Question Number:', data.question_number, '/', data.total_questions);
+  // console.log('====================');
+
+  // Reset voted participants display
+  const votedParticipants = document.getElementById('votedParticipants');
+  if (votedParticipants) {
+    votedParticipants.innerHTML = '';
+  }
 
   songNumber.textContent = data.question_number;
   totalSongs.textContent = data.total_questions;
@@ -573,41 +663,33 @@ function displayQuestion(data) {
     }
   }
 
-  const spotifyPlayerUI = document.getElementById('spotifyPlayerUI');
-
   // Try Web Playback SDK first if available and we have a track URI
   let audioAvailable = false;
 
   if (data.track_uri && spotifyPlayer && deviceId) {
     console.log('Using Spotify Web Playback SDK for track:', data.track_uri);
     playSpotifyTrack(data.track_uri);
-
-    // Hide HTML5 audio, show Spotify UI
-    audioPlayer.style.display = 'none';
-    if (spotifyPlayerUI) {
-      spotifyPlayerUI.classList.remove('hidden');
-      document.getElementById('playerTrackInfo').textContent = `Playing: ${data.track_name || 'Loading...'}`;
-    }
     audioAvailable = true;
+    // Start enhanced simulated visualization with track data
+    startVisualizerAnimation(data.track_name);
   } else if (data.preview_url) {
     // Fall back to preview URL
     console.log('Using preview URL');
     audioPlayer.src = data.preview_url;
     audioPlayer.load();
-    audioPlayer.play();
-    audioPlayer.style.display = 'block';
-
-    // Hide Spotify UI
-    if (spotifyPlayerUI) {
-      spotifyPlayerUI.classList.add('hidden');
-    }
+    audioPlayer.play().then(() => {
+      // Notify backend that playback has started
+      socket.emit('playback_started', { pin: currentPin });
+    });
     audioAvailable = true;
+    // Start audio visualization
+    setupAudioVisualization();
   }
 
   // Handle no audio case
   if (!audioAvailable) {
     audioPlayer.removeAttribute('src');
-    audioPlayer.style.display = 'none';
+    stopVisualization();
 
     // Show a visual indicator instead
     const audioContainer = audioPlayer.parentElement;
@@ -646,23 +728,54 @@ function displayQuestion(data) {
   });
 }
 
-function highlightCorrectAnswer(correctIndex) {
-  // Pause audio
+function displayVotedParticipant(playerName) {
+  const votedParticipants = document.getElementById('votedParticipants');
+  if (!votedParticipants) return;
+
+  // Check if already displayed to avoid duplicates
+  if (votedParticipants.querySelector(`[data-player="${playerName}"]`)) {
+    return;
+  }
+
+  // Color palette matching the app's design theme (indigo/purple/pink spectrum)
+  const colors = ['667eea', '764ba2', '8b5cf6', '9333ea', 'a855f7', 'c084fc', 'd8b4fe', 'e879f9', 'f0abfc', 'f9a8d4'];
+
+  // Use a hash of the name to consistently assign the same color to the same player
+  let hash = 0;
+  for (let i = 0; i < playerName.length; i++) {
+    hash = playerName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colorIndex = Math.abs(hash) % colors.length;
+  const color = colors[colorIndex];
+  const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(playerName)}&backgroundColor=${color}&fontSize=40`;
+
+  const avatarDiv = document.createElement('div');
+  avatarDiv.className = 'flex flex-col items-center gap-1';
+  avatarDiv.setAttribute('data-player', playerName);
+  avatarDiv.innerHTML = `
+    <img src="${avatarUrl}" alt="${playerName}" class="w-10 h-10 rounded-full border-2 border-green-500 shadow-md">
+    <span class="text-xs text-gray-600 font-medium max-w-[60px] truncate">${playerName}</span>
+  `;
+
+  votedParticipants.appendChild(avatarDiv);
+}
+
+function displayCorrectAnswer(correctIndex, correctArtist) {
+  // Stop the timer
+  stopQuestionTimer();
+
+  // Pause audio and stop visualization
   if (spotifyPlayer && deviceId) {
     spotifyPlayer.pause();
   } else {
     audioPlayer.pause();
   }
+  stopVisualization();
 
-  // Grey out wrong answers and highlight correct one
-  const allOptions = document.querySelectorAll('.answer-option');
-  allOptions.forEach((option, index) => {
-    if (index === correctIndex) {
-      option.classList.add('correct');
-    } else {
-      option.classList.add('incorrect');
-    }
-  });
+  // Store correct answer data for display in modal
+  if (currentQuestion) {
+    currentQuestion.displayedCorrectArtist = correctArtist || (currentQuestion.options && currentQuestion.options[correctIndex]);
+  }
 }
 
 function updateScoreboard(scores) {
@@ -693,18 +806,25 @@ function updateScoreboard(scores) {
 function updateIntermediateScoreboard(scores) {
   intermediateScoresList.innerHTML = '';
 
+  // Random color palette for avatars
+  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
+
   scores.forEach((player, index) => {
     const div = document.createElement('div');
-    div.className = 'score-item';
+    div.className = 'flex items-center justify-between p-4 bg-gray-50 rounded-lg';
 
-    if (index === 0) div.classList.add('first');
-    else if (index === 1) div.classList.add('second');
-    else if (index === 2) div.classList.add('third');
+    // Use random color based on player index
+    const color = colors[index % colors.length];
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
 
     div.innerHTML = `
-            <span>${index + 1}. ${player.name}</span>
-            <span>${player.score} pts</span>
-        `;
+      <div class="flex items-center gap-4">
+        <span class="text-2xl font-bold text-gray-600 w-8">${index + 1}</span>
+        <img src="${avatarUrl}" alt="${player.name}" class="w-12 h-12 rounded-full">
+        <span class="text-lg font-semibold text-gray-800">${player.name}</span>
+      </div>
+      <span class="text-xl font-bold text-primary">${player.score} pts</span>
+    `;
 
     intermediateScoresList.appendChild(div);
   });
@@ -713,24 +833,275 @@ function updateIntermediateScoreboard(scores) {
 function displayFinalScores(scores) {
   finalScores.innerHTML = '';
 
+  // Random color palette for avatars
+  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
+
   scores.forEach((player, index) => {
     const div = document.createElement('div');
-    div.className = 'score-item';
-
-    if (index === 0) div.classList.add('first');
-    else if (index === 1) div.classList.add('second');
-    else if (index === 2) div.classList.add('third');
+    div.className = 'flex items-center justify-between p-4 bg-gray-50 rounded-lg';
 
     let medal = '';
-    if (index === 0) medal = '🥇 ';
-    else if (index === 1) medal = '🥈 ';
-    else if (index === 2) medal = '🥉 ';
+    if (index === 0) medal = '🥇';
+    else if (index === 1) medal = '🥈';
+    else if (index === 2) medal = '🥉';
+
+    // Use random color based on player index
+    const color = colors[index % colors.length];
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
 
     div.innerHTML = `
-            <span>${medal}${player.name}</span>
-            <span>${player.score} pts</span>
-        `;
+      <div class="flex items-center gap-4">
+        ${medal ? `<span class="text-3xl">${medal}</span>` : `<span class="text-2xl font-bold text-gray-600 w-8">${index + 1}</span>`}
+        <img src="${avatarUrl}" alt="${player.name}" class="w-12 h-12 rounded-full">
+        <span class="text-lg font-semibold text-gray-800">${player.name}</span>
+      </div>
+      <span class="text-xl font-bold text-primary">${player.score} pts</span>
+    `;
 
     finalScores.appendChild(div);
   });
 }
+
+// Audio Visualization
+let audioContext;
+let analyser;
+let dataArray;
+let bufferLength;
+let animationId;
+let animationRunning = false;
+
+function setupAudioVisualization() {
+  const canvas = document.getElementById('audioVisualizer');
+  if (!canvas) return;
+
+  const canvasCtx = canvas.getContext('2d');
+
+  // Create audio context if not exists
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+
+    const source = audioContext.createMediaElementSource(audioPlayer);
+    source.connect(analyser);
+    analyser.connect(audioContext.destination);
+  }
+
+  bufferLength = analyser.frequencyBinCount;
+  dataArray = new Uint8Array(bufferLength);
+
+  // Start visualization
+  visualize(canvas, canvasCtx);
+}
+
+function startVisualizerAnimation(trackName) {
+  // For Spotify SDK playback, create an enhanced simulated animation
+  const canvas = document.getElementById('audioVisualizer');
+  if (!canvas) return;
+
+  const canvasCtx = canvas.getContext('2d');
+  animationRunning = true;
+  simulatedVisualize(canvas, canvasCtx, trackName);
+}
+
+function visualize(canvas, canvasCtx) {
+  if (!analyser) return;
+
+  animationRunning = true;
+
+  function draw() {
+    if (!animationRunning) return;
+
+    animationId = requestAnimationFrame(draw);
+    analyser.getByteFrequencyData(dataArray);
+
+    // Clear canvas with solid background matching the card
+    canvasCtx.fillStyle = '#ffffff';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const barWidth = (canvas.width / bufferLength) * 2.5;
+    let barHeight;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+      barHeight = (dataArray[i] / 255) * canvas.height;
+
+      // Solid primary color bars
+      canvasCtx.fillStyle = '#667eea';
+      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+
+      x += barWidth + 1;
+    }
+  }
+
+  draw();
+}
+
+function simulatedVisualize(canvas, canvasCtx, trackName) {
+  // Enhanced simulated visualization for Spotify SDK playback
+  const bars = 64;
+  const barValues = new Array(bars).fill(0);
+  const targetValues = new Array(bars).fill(0);
+
+  // Estimate BPM range (most music is 60-180 BPM)
+  const baseBPM = 120 + Math.random() * 40; // Random between 120-160 BPM
+  const beatInterval = (60 / baseBPM) * 1000; // Beat duration in ms
+
+  let startTime = Date.now();
+  let lastBeatTime = startTime;
+  let beatPhase = 0;
+  let energy = 0.5; // Energy level 0-1
+  let targetEnergy = 0.5;
+
+  // Get playback position for progress-based patterns
+  async function getPlaybackState() {
+    if (!spotifyPlayer) return null;
+    try {
+      const state = await spotifyPlayer.getCurrentState();
+      return state;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function draw() {
+    if (!animationRunning) return;
+
+    animationId = requestAnimationFrame(draw);
+
+    const now = Date.now();
+    const elapsed = now - startTime;
+
+    // Simulate beat detection with rhythm
+    if (now - lastBeatTime >= beatInterval) {
+      lastBeatTime = now;
+      beatPhase = 1.0;
+      // Vary energy every few beats
+      if (Math.random() > 0.7) {
+        targetEnergy = 0.3 + Math.random() * 0.6;
+      }
+    }
+
+    // Beat decay
+    beatPhase *= 0.85;
+    energy += (targetEnergy - energy) * 0.05;
+
+    // Clear canvas with solid background matching the card
+    canvasCtx.fillStyle = '#ffffff';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const barWidth = canvas.width / bars - 2;
+
+    // Get playback state for progress-based effects
+    if (Math.random() < 0.02) { // Check occasionally to avoid performance hit
+      getPlaybackState().then(state => {
+        if (state && state.position && state.duration) {
+          const progress = state.position / state.duration;
+          // Use progress to influence visualization intensity
+          targetEnergy = 0.3 + progress * 0.4 + Math.random() * 0.3;
+        }
+      });
+    }
+
+    for (let i = 0; i < bars; i++) {
+      // Create frequency-like distribution (lower bars = bass, higher = treble)
+      const freqFactor = 1 - (i / bars) * 0.5; // Bass stronger than treble
+
+      // Multiple sine waves for richer movement
+      const wave1 = Math.sin(elapsed / 300 + i * 0.15) * 0.15;
+      const wave2 = Math.sin(elapsed / 150 + i * 0.08) * 0.1;
+      const wave3 = Math.sin(elapsed / 500 + i * 0.25) * 0.08;
+
+      // Beat pulse (affects all bars but more on bass)
+      const beatPulse = beatPhase * freqFactor * 0.4;
+
+      // Random variation (less than before)
+      const randomVariation = Math.random() * 0.1;
+
+      // Combine all factors with energy
+      targetValues[i] = (wave1 + wave2 + wave3 + beatPulse + randomVariation + 0.2) * energy * freqFactor;
+      targetValues[i] = Math.max(0.05, Math.min(1, targetValues[i]));
+
+      // Smooth transition
+      barValues[i] += (targetValues[i] - barValues[i]) * 0.15;
+
+      const barHeight = barValues[i] * canvas.height;
+      const x = i * (barWidth + 2);
+
+      // Solid primary color bars
+      canvasCtx.fillStyle = '#667eea';
+      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+    }
+  }
+
+  draw();
+}
+
+function stopVisualization() {
+  animationRunning = false;
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+  }
+
+  // Clear canvas with white background
+  const canvas = document.getElementById('audioVisualizer');
+  if (canvas) {
+    const canvasCtx = canvas.getContext('2d');
+    canvasCtx.fillStyle = '#ffffff';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+// Question Timer Functions
+function startQuestionTimer() {
+  stopQuestionTimer(); // Clear any existing timer
+
+  const timerProgress = document.getElementById('timerProgress');
+  const timeRemaining = document.getElementById('timeRemaining');
+
+  if (!timerProgress || !timeRemaining) return;
+
+  questionStartTime = Date.now();
+  timerProgress.style.width = '100%';
+  timerProgress.classList.remove('bg-red-500');
+  timerProgress.classList.add('bg-gradient-to-r', 'from-green-500', 'to-emerald-600');
+
+  questionTimer = setInterval(() => {
+    const elapsed = (Date.now() - questionStartTime) / 1000;
+    const remaining = Math.max(0, QUESTION_TIME_LIMIT - elapsed);
+    const percentage = (remaining / QUESTION_TIME_LIMIT) * 100;
+
+    timeRemaining.textContent = `${Math.ceil(remaining)}s`;
+    timerProgress.style.width = `${percentage}%`;
+
+    // Change color when time is running out
+    if (remaining <= 3 && remaining > 0) {
+      timerProgress.classList.remove('bg-gradient-to-r', 'from-green-500', 'to-emerald-600');
+      timerProgress.classList.add('bg-red-500');
+    }
+
+    if (remaining <= 0) {
+      stopQuestionTimer();
+    }
+  }, 100);
+}
+
+function stopQuestionTimer() {
+  if (questionTimer) {
+    clearInterval(questionTimer);
+    questionTimer = null;
+  }
+
+  // Clear the timer bar to show it empty
+  const timerProgress = document.getElementById('timerProgress');
+  const timeRemaining = document.getElementById('timeRemaining');
+
+  if (timerProgress) {
+    timerProgress.style.width = '0%';
+  }
+
+  if (timeRemaining) {
+    timeRemaining.textContent = '0s';
+  }
+}
+

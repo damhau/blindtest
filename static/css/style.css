@@ -400,21 +400,20 @@ small {
   border-radius: 10px;
   padding: 15px;
   cursor: pointer;
-  transition: none;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.2s ease;
   text-align: center;
+  transform-origin: center center;
 }
 
 .playlist-card:hover {
   border-color: #667eea;
   transform: translateY(-2px);
   box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
-  transition: all 0.2s ease;
 }
 
 .playlist-card:active {
-  transform: scale(0.95) !important;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.5) !important;
-  transition: all 0.1s ease !important;
+  transform: scale(0.92);
+  box-shadow: 0 1px 4px rgba(102, 126, 234, 0.6);
 }
 
 .playlist-card.selected {
@@ -707,19 +706,15 @@ small {
 }
 
 .answer-option.correct {
-  animation: pulse 0.5s ease;
-  box-shadow: 0 0 30px rgba(76, 175, 80, 0.8);
-  border: 3px solid #4CAF50;
+  /* Removed - no longer using animations */
 }
 
 .answer-option.correct .checkmark {
-  display: block;
+  /* Removed - no longer using animations */
 }
 
 .answer-option.incorrect {
-  opacity: 0.3;
-  filter: grayscale(100%);
-  transition: all 0.5s ease;
+  /* Removed - no longer using animations */
 }
 
 @keyframes checkmarkAppear {

@@ -1,4 +1,8 @@
-- choisir les nom d'artiste
-- calculer les score avec la vitesse de reponse
-- passer a la chanson suivant automatiquement
-- monter la bonne reponse que une fois que tout le monde a voter
+- [ ] Afficher bar de temps avec un max de 10 sec et apres 10 sec le vote se termine automatiquement
+- [ ] Revoir le calcul de classement, valeur actuel:
+  - 1er: 100
+  - 2eme: 50
+  - 3eme: 25
+  - 4eme: 12.5
+
+

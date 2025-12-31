@@ -151,9 +151,12 @@ socket.on('new_question_participant', (data) => {
   hasAnswered = false;
 
   // Reset buttons
-  answerButtons.forEach(btn => {
+  answerButtons.forEach((btn, index) => {
     btn.disabled = false;
     btn.classList.remove('selected');
+    btn.style.border = '';
+    // Reset button content to just the letter
+    btn.innerHTML = `<span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>`;
   });
 
   // Hide feedback
@@ -171,8 +174,34 @@ socket.on('scores_updated', (data) => {
 });
 
 socket.on('show_correct_answer', (data) => {
+  // Highlight the correct answer button with a checkmark
+  const correctIndex = data.correct_answer;
+  answerButtons.forEach((btn, index) => {
+    if (index === correctIndex) {
+      // Add checkmark to correct answer
+      btn.innerHTML = `
+        <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
+        <span class="text-3xl ml-2">✓</span>
+      `;
+      btn.style.border = '4px solid white';
+    }
+  });
+
   // Show which color was correct
   if (!hasAnswered) {
+    answerFeedback.classList.remove('hidden');
+    answerFeedback.className = 'feedback incorrect';
+    answerFeedback.textContent = '⏱ Time\'s up!';
+  }
+
+  // Notify server that correct answer has been displayed
+  socket.emit('correct_answer_displayed', { pin: currentPin });
+});
+
+socket.on('question_timeout', () => {
+  // Disable voting when time runs out
+  if (!hasAnswered) {
+    answerButtons.forEach(btn => btn.disabled = true);
     answerFeedback.classList.remove('hidden');
     answerFeedback.className = 'feedback incorrect';
     answerFeedback.textContent = '⏱ Time\'s up!';
@@ -204,9 +233,21 @@ function showScreen(screen) {
 function updateWaitingParticipants(participants) {
   waitingParticipants.innerHTML = '';
 
-  participants.forEach(p => {
+  // Random color palette for avatars
+  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
+
+  participants.forEach((p, index) => {
     const li = document.createElement('li');
-    li.textContent = p.name;
+    li.className = 'flex items-center gap-3 p-2 bg-gray-50 rounded-lg';
+
+    // Use random color based on player index
+    const color = colors[index % colors.length];
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name)}&backgroundColor=${color}&fontSize=40`;
+
+    li.innerHTML = `
+      <img src="${avatarUrl}" alt="${p.name}" class="w-8 h-8 rounded-full">
+      <span class="font-medium text-gray-800">${p.name}</span>
+    `;
     waitingParticipants.appendChild(li);
   });
 }
