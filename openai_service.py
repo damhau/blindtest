@@ -54,7 +54,7 @@ class OpenAIService:
 
     Task:
     1) Generate {real_count} real recording artists that could plausibly be confused with "{correct_artist}"{genre_text}.
-    2) Generate 1 funny fake artist name that is clearly NOT a real artist, but is a playful riff on "{correct_artist}".
+    2) Generate 1 funny fake artist name that is clearly NOT a real artist, but is a playful riff.
 
     Rules for the REAL artists:
     - Must be real artists you are confident exist (not fictional, not labels, not venues).
@@ -63,10 +63,11 @@ class OpenAIService:
     - Must be distinct.
 
     Rules for the FUNNY fake:
-    - Must be obviously fictional and comedic (a pun / typo twist / silly remix of the name).
-    - Must remain recognizable as inspired by "{correct_artist}".
-    - Must NOT match any known real artist (avoid simple changes like adding/removing one letter only).
+    - Must be obviously fictional and comedic (a pun / typo twist / silly remix of the name of an artist).
+    - May match any known real artist with a simple changes like adding/removing one letter only.
     - Keep it short (1–4 words).
+    - Must be distinct from all real artists generated.
+    - Must not be inspired by "{correct_artist}".
 
     Choose the real distractors using:
     - name similarity (spelling, phonetics, spacing, initials, stage-name style)
