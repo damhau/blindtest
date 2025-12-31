@@ -337,6 +337,109 @@ def get_spotify_token():
         'expires_in': token_info.get('expires_in')
     })
 
+@app.route('/api/user/profile')
+def get_user_profile_api():
+    """Get user profile data from Spotify"""
+    token_info = session.get('spotify_token')
+    
+    if not token_info:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(token_info)
+        
+        if not sp_client:
+            return jsonify({'error': 'Failed to get Spotify client'}), 500
+        
+        # Update session if token was refreshed
+        if refreshed_token != token_info:
+            session['spotify_token'] = refreshed_token
+        
+        # Get user profile
+        user_info = sp_client.current_user()
+        
+        # Get user's top artists (for profile customization)
+        try:
+            top_artists = sp_client.current_user_top_artists(limit=5, time_range='medium_term')
+        except Exception as e:
+            print(f"Error fetching top artists: {e}")
+            top_artists = None
+        
+        # Get user's saved tracks count
+        try:
+            saved_tracks = sp_client.current_user_saved_tracks(limit=1)
+        except Exception as e:
+            print(f"Error fetching saved tracks: {e}")
+            saved_tracks = None
+        
+        profile_data = {
+            'display_name': user_info.get('display_name', 'User'),
+            'email': user_info.get('email'),
+            'country': user_info.get('country'),
+            'product': user_info.get('product'),  # free/premium
+            'followers': user_info.get('followers', {}).get('total', 0),
+            'profile_image': user_info['images'][0]['url'] if user_info.get('images') else None,
+            'spotify_url': user_info.get('external_urls', {}).get('spotify'),
+            'top_artists': [
+                {
+                    'name': artist['name'],
+                    'image': artist['images'][0]['url'] if artist.get('images') else None,
+                    'genres': artist.get('genres', [])[:3]
+                }
+                for artist in top_artists['items']
+            ] if top_artists else [],
+            'saved_tracks_count': saved_tracks['total'] if saved_tracks else 0
+        }
+        
+        return jsonify(profile_data)
+        
+    except Exception as e:
+        print(f"Error fetching profile: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/user/settings', methods=['GET', 'POST'])
+def user_settings():
+    """Get or update user settings"""
+    if request.method == 'GET':
+        # Get settings from session or defaults
+        settings = session.get('user_settings', {
+            'theme': 'light',
+            'sound_effects': True,
+            'notifications': True,
+            'default_game_length': 10,
+            'difficulty_preference': 'medium',
+            'show_leaderboard': True,
+            'auto_start_games': False,
+            'preferred_genres': []
+        })
+        return jsonify(settings)
+    
+    elif request.method == 'POST':
+        # Update settings
+        settings = request.json
+        session['user_settings'] = settings
+        return jsonify({'success': True, 'settings': settings})
+
+
+@app.route('/api/user/stats')
+def user_stats():
+    """Get user game statistics"""
+    # This would query the database once implemented
+    # For now, return mock data structure
+    stats = {
+        'games_played': 0,
+        'total_score': 0,
+        'correct_answers': 0,
+        'avg_response_time': 0,
+        'best_score': 0,
+        'favorite_genre': 'Unknown',
+        'win_rate': 0,
+        'current_streak': 0,
+        'longest_streak': 0
+    }
+    
+    return jsonify(stats)
 
 @app.route('/my_playlists')
 def my_playlists():
@@ -843,16 +946,13 @@ def handle_submit_answer(data):
     
     # Check if all participants have answered
     current_answers = room.answers.get(room.question_index, {})
-    if len(current_answers) == len(room.participants) and not room.voting_closed:
-        print(f'All {len(room.participants)} participants have answered question {room.question_index + 1}')
+    if len(current_answers) == len(room.participants):
+        print(f'All {len(room.participants)} participants have answered question {room.question_index + 1} - music will continue until timer ends')
         
-        # Use same flow as timeout for consistency
-        def all_answered_flow():
-            socketio.sleep(0)  # Yield to allow last answer to be processed
-            if pin in rooms and not rooms[pin].voting_closed:
-                close_voting_and_show_answer(pin)
-        
-        socketio.start_background_task(all_answered_flow)
+        # Notify that all have voted (but don't end the question yet - let timer finish)
+        socketio.emit('all_participants_voted', {
+            'message': 'All players have voted - music continues'
+        }, room=pin)
 
 
 @socketio.on('next_question')

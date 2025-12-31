@@ -1337,6 +1337,563 @@ def handle_join_room(data):
     # ... continue with join logic ...
 ```
 
+### 5.3 User Profile & Settings Implementation
+
+**Issue**: Currently using placeholder "Profile coming soon!" buttons. No user preferences or Spotify profile integration.
+
+**Proposal - Complete Profile & Settings System**:
+
+**Backend - User Profile Endpoints**:
+
+```python
+# app.py additions
+@app.route('/profile')
+def profile():
+    """User profile page"""
+    token_info = session.get('spotify_token')
+    
+    if not token_info:
+        return redirect('/login')
+    
+    return render_template('profile.html')
+
+@app.route('/api/user/profile')
+def get_user_profile():
+    """Get user profile data from Spotify"""
+    token_info = session.get('spotify_token')
+    
+    if not token_info:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(token_info)
+        
+        if not sp_client:
+            return jsonify({'error': 'Failed to get Spotify client'}), 500
+        
+        # Update session if token was refreshed
+        if refreshed_token != token_info:
+            session['spotify_token'] = refreshed_token
+        
+        # Get user profile
+        user_info = sp_client.current_user()
+        
+        # Get user's top artists (for profile customization)
+        top_artists = sp_client.current_user_top_artists(limit=5, time_range='medium_term')
+        
+        # Get user's saved tracks count
+        saved_tracks = sp_client.current_user_saved_tracks(limit=1)
+        
+        profile_data = {
+            'display_name': user_info.get('display_name', 'User'),
+            'email': user_info.get('email'),
+            'country': user_info.get('country'),
+            'product': user_info.get('product'),  # free/premium
+            'followers': user_info.get('followers', {}).get('total', 0),
+            'profile_image': user_info['images'][0]['url'] if user_info.get('images') else None,
+            'spotify_url': user_info.get('external_urls', {}).get('spotify'),
+            'top_artists': [
+                {
+                    'name': artist['name'],
+                    'image': artist['images'][0]['url'] if artist.get('images') else None,
+                    'genres': artist.get('genres', [])[:3]
+                }
+                for artist in top_artists['items']
+            ] if top_artists else [],
+            'saved_tracks_count': saved_tracks['total'] if saved_tracks else 0
+        }
+        
+        return jsonify(profile_data)
+        
+    except Exception as e:
+        print(f"Error fetching profile: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user/settings', methods=['GET', 'POST'])
+def user_settings():
+    """Get or update user settings"""
+    if request.method == 'GET':
+        # Get settings from session or defaults
+        settings = session.get('user_settings', {
+            'theme': 'light',
+            'sound_effects': True,
+            'notifications': True,
+            'default_game_length': 10,
+            'difficulty_preference': 'medium',
+            'show_leaderboard': True,
+            'auto_start_games': False,
+            'preferred_genres': []
+        })
+        return jsonify(settings)
+    
+    elif request.method == 'POST':
+        # Update settings
+        settings = request.json
+        session['user_settings'] = settings
+        return jsonify({'success': True, 'settings': settings})
+
+@app.route('/api/user/stats')
+def user_stats():
+    """Get user game statistics"""
+    # This would query the database once implemented
+    # For now, return mock data structure
+    stats = {
+        'games_played': 0,
+        'total_score': 0,
+        'correct_answers': 0,
+        'avg_response_time': 0,
+        'best_score': 0,
+        'favorite_genre': 'Unknown',
+        'win_rate': 0,
+        'current_streak': 0,
+        'longest_streak': 0
+    }
+    
+    return jsonify(stats)
+```
+
+**Frontend - Profile Dropdown Menu (Replace placeholder)**:
+
+```html
+<!-- In host.html and index.html navigation -->
+<div class="relative">
+  <!-- User Avatar/Button -->
+  <button id="profileMenuBtn" onclick="toggleProfileMenu()" 
+    class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+    <img id="userAvatar" src="/static/assets/default-avatar.png" 
+      alt="Profile" class="w-8 h-8 rounded-full">
+    <span id="userName" class="font-medium text-gray-700">Profile</span>
+    <svg class="w-4 h-4 text-gray-500 transition-transform" id="profileMenuIcon" 
+      fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+    </svg>
+  </button>
+
+  <!-- Dropdown Menu -->
+  <div id="profileMenu" class="hidden absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
+    <!-- User Info Section -->
+    <div class="px-4 py-3 border-b border-gray-100">
+      <div class="flex items-center gap-3">
+        <img id="menuAvatar" src="/static/assets/default-avatar.png" 
+          class="w-12 h-12 rounded-full">
+        <div class="flex-1">
+          <p id="menuUserName" class="font-semibold text-gray-800">Loading...</p>
+          <p id="menuUserEmail" class="text-sm text-gray-500">email@example.com</p>
+        </div>
+      </div>
+      <div class="mt-2 flex gap-2 text-xs">
+        <span id="userPlan" class="px-2 py-1 bg-purple-100 text-purple-700 rounded">Premium</span>
+        <span class="px-2 py-1 bg-gray-100 text-gray-700 rounded">
+          <span id="gamesPlayed">0</span> games played
+        </span>
+      </div>
+    </div>
+
+    <!-- Menu Items -->
+    <div class="py-2">
+      <a href="/profile" class="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 transition-colors">
+        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+        </svg>
+        <span class="text-gray-700 font-medium">View Profile</span>
+      </a>
+
+      <button onclick="openSettingsModal()" class="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-50 transition-colors">
+        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+        </svg>
+        <span class="text-gray-700 font-medium">Settings</span>
+      </button>
+
+      <a href="/leaderboard" class="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 transition-colors">
+        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+        </svg>
+        <span class="text-gray-700 font-medium">Leaderboard</span>
+      </a>
+    </div>
+
+    <div class="border-t border-gray-100 pt-2">
+      <a href="/logout" class="flex items-center gap-3 px-4 py-2 hover:bg-red-50 transition-colors text-red-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+        </svg>
+        <span class="font-medium">Logout</span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+  <div class="flex items-center justify-center min-h-screen px-4">
+    <div class="fixed inset-0 bg-black bg-opacity-50" onclick="closeSettingsModal()"></div>
+    
+    <div class="relative bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <!-- Header -->
+      <div class="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-4 rounded-t-2xl">
+        <div class="flex items-center justify-between">
+          <h2 class="text-2xl font-bold">⚙️ Settings</h2>
+          <button onclick="closeSettingsModal()" class="text-white hover:text-gray-200">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Settings Content -->
+      <div class="p-6 space-y-6">
+        <!-- Game Preferences -->
+        <div class="space-y-4">
+          <h3 class="text-lg font-bold text-gray-800">Game Preferences</h3>
+          
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-700">Default Game Length</p>
+              <p class="text-sm text-gray-500">Number of questions per game</p>
+            </div>
+            <select id="settingGameLength" class="px-4 py-2 border border-gray-300 rounded-lg">
+              <option value="5">5 questions</option>
+              <option value="10" selected>10 questions</option>
+              <option value="15">15 questions</option>
+              <option value="20">20 questions</option>
+            </select>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-700">Difficulty Preference</p>
+              <p class="text-sm text-gray-500">Default difficulty for games</p>
+            </div>
+            <select id="settingDifficulty" class="px-4 py-2 border border-gray-300 rounded-lg">
+              <option value="easy">Easy</option>
+              <option value="medium" selected>Medium</option>
+              <option value="hard">Hard</option>
+            </select>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-700">Sound Effects</p>
+              <p class="text-sm text-gray-500">Play sounds for actions</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="settingSoundEffects" class="sr-only peer" checked>
+              <div class="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-700">Notifications</p>
+              <p class="text-sm text-gray-500">Show game notifications</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="settingNotifications" class="sr-only peer" checked>
+              <div class="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Display Settings -->
+        <div class="space-y-4 pt-4 border-t border-gray-200">
+          <h3 class="text-lg font-bold text-gray-800">Display</h3>
+          
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-700">Theme</p>
+              <p class="text-sm text-gray-500">Visual appearance</p>
+            </div>
+            <select id="settingTheme" class="px-4 py-2 border border-gray-300 rounded-lg">
+              <option value="light" selected>Light</option>
+              <option value="dark">Dark</option>
+              <option value="auto">Auto</option>
+            </select>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-700">Show Leaderboard</p>
+              <p class="text-sm text-gray-500">Display global rankings</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="settingShowLeaderboard" class="sr-only peer" checked>
+              <div class="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Account Actions -->
+        <div class="space-y-4 pt-4 border-t border-gray-200">
+          <h3 class="text-lg font-bold text-gray-800">Account</h3>
+          
+          <button onclick="clearGameHistory()" 
+            class="w-full px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-left">
+            <p class="font-medium text-gray-700">Clear Game History</p>
+            <p class="text-sm text-gray-500">Remove all stored game data</p>
+          </button>
+
+          <button onclick="window.location.href='/logout'" 
+            class="w-full px-4 py-3 border border-red-300 rounded-lg hover:bg-red-50 text-left text-red-600">
+            <p class="font-medium">Logout from Spotify</p>
+            <p class="text-sm">You'll need to login again</p>
+          </button>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="sticky bottom-0 bg-gray-50 px-6 py-4 rounded-b-2xl flex justify-end gap-3">
+        <button onclick="closeSettingsModal()" 
+          class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100">
+          Cancel
+        </button>
+        <button onclick="saveSettings()" 
+          class="px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700">
+          Save Changes
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+**JavaScript Implementation**:
+
+```javascript
+// Profile and settings management
+let userProfile = null;
+let userSettings = null;
+
+// Load user profile on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadUserProfile();
+  loadUserSettings();
+});
+
+async function loadUserProfile() {
+  try {
+    const response = await fetch('/api/user/profile');
+    
+    if (response.ok) {
+      userProfile = await response.json();
+      updateProfileUI(userProfile);
+    } else {
+      console.log('User not authenticated');
+    }
+  } catch (error) {
+    console.error('Failed to load profile:', error);
+  }
+}
+
+function updateProfileUI(profile) {
+  // Update avatar images
+  if (profile.profile_image) {
+    document.getElementById('userAvatar').src = profile.profile_image;
+    document.getElementById('menuAvatar').src = profile.profile_image;
+  }
+  
+  // Update display name
+  const displayName = profile.display_name || 'User';
+  document.getElementById('userName').textContent = displayName;
+  document.getElementById('menuUserName').textContent = displayName;
+  
+  // Update email
+  if (profile.email) {
+    document.getElementById('menuUserEmail').textContent = profile.email;
+  }
+  
+  // Update plan badge
+  const planBadge = document.getElementById('userPlan');
+  if (profile.product === 'premium') {
+    planBadge.textContent = '⭐ Premium';
+    planBadge.className = 'px-2 py-1 bg-yellow-100 text-yellow-700 rounded';
+  } else {
+    planBadge.textContent = 'Free';
+    planBadge.className = 'px-2 py-1 bg-gray-100 text-gray-700 rounded';
+  }
+}
+
+function toggleProfileMenu() {
+  const menu = document.getElementById('profileMenu');
+  const icon = document.getElementById('profileMenuIcon');
+  
+  if (menu.classList.contains('hidden')) {
+    menu.classList.remove('hidden');
+    icon.style.transform = 'rotate(180deg)';
+  } else {
+    menu.classList.add('hidden');
+    icon.style.transform = 'rotate(0deg)';
+  }
+}
+
+// Close menu when clicking outside
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('profileMenu');
+  const btn = document.getElementById('profileMenuBtn');
+  
+  if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
+    menu.classList.add('hidden');
+    document.getElementById('profileMenuIcon').style.transform = 'rotate(0deg)';
+  }
+});
+
+// Settings modal functions
+function openSettingsModal() {
+  document.getElementById('settingsModal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  
+  // Close profile menu
+  document.getElementById('profileMenu').classList.add('hidden');
+  
+  // Load current settings into form
+  if (userSettings) {
+    document.getElementById('settingGameLength').value = userSettings.default_game_length || 10;
+    document.getElementById('settingDifficulty').value = userSettings.difficulty_preference || 'medium';
+    document.getElementById('settingSoundEffects').checked = userSettings.sound_effects !== false;
+    document.getElementById('settingNotifications').checked = userSettings.notifications !== false;
+    document.getElementById('settingTheme').value = userSettings.theme || 'light';
+    document.getElementById('settingShowLeaderboard').checked = userSettings.show_leaderboard !== false;
+  }
+}
+
+function closeSettingsModal() {
+  document.getElementById('settingsModal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+async function loadUserSettings() {
+  try {
+    const response = await fetch('/api/user/settings');
+    if (response.ok) {
+      userSettings = await response.json();
+      applySettings(userSettings);
+    }
+  } catch (error) {
+    console.error('Failed to load settings:', error);
+  }
+}
+
+async function saveSettings() {
+  const settings = {
+    default_game_length: parseInt(document.getElementById('settingGameLength').value),
+    difficulty_preference: document.getElementById('settingDifficulty').value,
+    sound_effects: document.getElementById('settingSoundEffects').checked,
+    notifications: document.getElementById('settingNotifications').checked,
+    theme: document.getElementById('settingTheme').value,
+    show_leaderboard: document.getElementById('settingShowLeaderboard').checked
+  };
+  
+  try {
+    const response = await fetch('/api/user/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    
+    if (response.ok) {
+      userSettings = settings;
+      applySettings(settings);
+      closeSettingsModal();
+      
+      // Show success notification
+      showNotification('Settings saved successfully!', 'success');
+    }
+  } catch (error) {
+    console.error('Failed to save settings:', error);
+    showNotification('Failed to save settings', 'error');
+  }
+}
+
+function applySettings(settings) {
+  // Apply theme
+  if (settings.theme === 'dark') {
+    document.body.classList.add('dark-mode');
+  } else {
+    document.body.classList.remove('dark-mode');
+  }
+  
+  // Other settings can be applied as needed
+}
+
+function clearGameHistory() {
+  if (confirm('Are you sure you want to clear all your game history? This cannot be undone.')) {
+    // Implement clear history logic
+    localStorage.clear();
+    showNotification('Game history cleared', 'success');
+  }
+}
+
+function showNotification(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${
+    type === 'success' ? 'bg-green-500' :
+    type === 'error' ? 'bg-red-500' :
+    'bg-blue-500'
+  } text-white font-medium`;
+  toast.textContent = message;
+  
+  document.body.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.classList.add('opacity-0');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+```
+
+**Benefits**:
+1. **Rich User Profiles** - Spotify data integration (avatar, name, plan, top artists)
+2. **Customizable Settings** - Game preferences, display options, notifications
+3. **Professional UI** - Dropdown menu with smooth transitions
+4. **Persistent Preferences** - Settings saved in session/database
+5. **Enhanced UX** - Clear account management and logout options
+
+### 5.4 Logging & Monitoring
+        return False, "Invalid playlist ID"
+    
+    playlist_id = playlist_id.strip()
+    
+    # Extract ID from full URL
+    if 'spotify.com/playlist/' in playlist_id:
+        match = re.search(r'playlist/([a-zA-Z0-9]+)', playlist_id)
+        if match:
+            playlist_id = match.group(1)
+    
+    # Validate format
+    if not re.match(r'^[a-zA-Z0-9]+$', playlist_id):
+        return False, "Invalid playlist ID format"
+    
+    return True, playlist_id
+
+# Use in handlers
+@socketio.on('join_room')
+def handle_join_room(data):
+    pin = data.get('pin', '')
+    name = data.get('name', '')
+    
+    # Validate PIN
+    valid, result = validate_pin(pin)
+    if not valid:
+        emit('error', {'message': result})
+        return
+    pin = result
+    
+    # Validate name
+    valid, result = validate_name(name)
+    if not valid:
+        emit('error', {'message': result})
+        return
+    name = result
+    
+    # ... continue with join logic ...
+```
+
 ### 5.3 Logging & Monitoring
 
 **Issue**: Minimal logging, hard to debug production issues.

@@ -1182,6 +1182,188 @@ function closeErrorModal() {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeErrorModal();
+    closeSettingsModal();
   }
 });
 
+
+// ===== Profile and Settings Management =====
+let userProfile = null;
+let userSettings = null;
+
+// Load user profile on page load
+document.addEventListener('DOMContentLoaded', () => {
+  loadUserProfile();
+  loadUserSettings();
+});
+
+async function loadUserProfile() {
+  try {
+    const response = await fetch('/api/user/profile');
+
+    if (response.ok) {
+      userProfile = await response.json();
+      updateProfileUI(userProfile);
+    } else {
+      console.log('User not authenticated');
+    }
+  } catch (error) {
+    console.error('Failed to load profile:', error);
+  }
+}
+
+function updateProfileUI(profile) {
+  // Update avatar images
+  if (profile.profile_image) {
+    const userAvatar = document.getElementById('userAvatar');
+    const menuAvatar = document.getElementById('menuAvatar');
+    if (userAvatar) userAvatar.src = profile.profile_image;
+    if (menuAvatar) menuAvatar.src = profile.profile_image;
+  }
+
+  // Update display name
+  const displayName = profile.display_name || 'User';
+  const menuUserName = document.getElementById('menuUserName');
+  if (menuUserName) menuUserName.textContent = displayName;
+
+  // Update email
+  if (profile.email) {
+    const menuUserEmail = document.getElementById('menuUserEmail');
+    if (menuUserEmail) menuUserEmail.textContent = profile.email;
+  }
+
+  // Update plan badge
+  const planBadge = document.getElementById('userPlan');
+  if (planBadge && profile.product) {
+    if (profile.product === 'premium') {
+      planBadge.textContent = '⭐ Premium';
+      planBadge.className = 'px-2 py-1 bg-yellow-100 text-yellow-700 rounded';
+    } else {
+      planBadge.textContent = 'Free';
+      planBadge.className = 'px-2 py-1 bg-gray-100 text-gray-700 rounded';
+    }
+  }
+}
+
+// Toggle profile menu
+document.addEventListener('click', (e) => {
+  const userMenuButton = document.getElementById('userMenuButton');
+  const userMenu = document.getElementById('userMenu');
+
+  if (!userMenuButton || !userMenu) return;
+
+  // Check if click is on the button
+  if (userMenuButton.contains(e.target)) {
+    userMenu.classList.toggle('hidden');
+  } else if (!userMenu.contains(e.target)) {
+    // Click outside - close menu
+    userMenu.classList.add('hidden');
+  }
+});
+
+// Settings modal functions
+function openSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+
+    // Close profile menu
+    const userMenu = document.getElementById('userMenu');
+    if (userMenu) userMenu.classList.add('hidden');
+
+    // Load current settings into form
+    if (userSettings) {
+      const gameLength = document.getElementById('settingGameLength');
+      const soundEffects = document.getElementById('settingSoundEffects');
+      const notifications = document.getElementById('settingNotifications');
+      const theme = document.getElementById('settingTheme');
+
+      if (gameLength) gameLength.value = userSettings.default_game_length || 10;
+      if (soundEffects) soundEffects.checked = userSettings.sound_effects !== false;
+      if (notifications) notifications.checked = userSettings.notifications !== false;
+      if (theme) theme.value = userSettings.theme || 'light';
+    }
+  }
+}
+
+function closeSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+}
+
+async function loadUserSettings() {
+  try {
+    const response = await fetch('/api/user/settings');
+    if (response.ok) {
+      userSettings = await response.json();
+      applySettings(userSettings);
+    }
+  } catch (error) {
+    console.error('Failed to load settings:', error);
+  }
+}
+
+async function saveSettings() {
+  const gameLength = document.getElementById('settingGameLength');
+  const soundEffects = document.getElementById('settingSoundEffects');
+  const notifications = document.getElementById('settingNotifications');
+  const theme = document.getElementById('settingTheme');
+
+  const settings = {
+    default_game_length: gameLength ? parseInt(gameLength.value) : 10,
+    sound_effects: soundEffects ? soundEffects.checked : true,
+    notifications: notifications ? notifications.checked : true,
+    theme: theme ? theme.value : 'light'
+  };
+
+  try {
+    const response = await fetch('/api/user/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+
+    if (response.ok) {
+      userSettings = settings;
+      applySettings(settings);
+      closeSettingsModal();
+
+      // Show success notification
+      showNotification('Settings saved successfully!', 'success');
+    }
+  } catch (error) {
+    console.error('Failed to save settings:', error);
+    showNotification('Failed to save settings', 'error');
+  }
+}
+
+function applySettings(settings) {
+  // Apply theme
+  if (settings.theme === 'dark') {
+    document.body.classList.add('dark-mode');
+  } else {
+    document.body.classList.remove('dark-mode');
+  }
+
+  // Other settings can be applied as needed
+}
+
+function showNotification(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${type === 'success' ? 'bg-green-500' :
+      type === 'error' ? 'bg-red-500' :
+        'bg-blue-500'
+    } text-white font-medium transition-opacity duration-300`;
+  toast.textContent = message;
+
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add('opacity-0');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
