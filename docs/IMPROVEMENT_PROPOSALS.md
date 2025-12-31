@@ -789,7 +789,273 @@ def handle_submit_answer(data):
     # ... continue with answer submission ...
 ```
 
-### 4.3 Database Persistence (Future Scalability)
+### 4.4 Real-Time Connection Status Indicator
+
+**Issue**: Users have no visibility into WebSocket connection status, leading to confusion when network issues occur.
+
+**Proposal - Connection Status Badge**:
+
+**HTML (Host & Participant)**:
+```html
+<!-- Add to top navigation in both host.html and participant.html -->
+<nav class="bg-white border-b border-gray-200 px-6 py-4">
+  <div class="max-w-7xl mx-auto flex items-center justify-between">
+    <!-- Existing logo/content -->
+    
+    <!-- Connection Status Badge -->
+    <div id="connectionStatus" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-100 border border-green-300">
+      <div id="connectionDot" class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+      <span id="connectionText" class="text-xs font-semibold text-green-700">Connected</span>
+    </div>
+  </div>
+</nav>
+```
+
+**CSS (Add to style.css)**:
+```css
+/* Connection status animations */
+#connectionStatus {
+  transition: all 0.3s ease;
+}
+
+#connectionStatus.connected {
+  background-color: #dcfce7;
+  border-color: #86efac;
+}
+
+#connectionStatus.connected #connectionDot {
+  background-color: #22c55e;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+#connectionStatus.connecting {
+  background-color: #fef3c7;
+  border-color: #fde047;
+}
+
+#connectionStatus.connecting #connectionDot {
+  background-color: #eab308;
+  animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+#connectionStatus.disconnected {
+  background-color: #fee2e2;
+  border-color: #fca5a5;
+}
+
+#connectionStatus.disconnected #connectionDot {
+  background-color: #ef4444;
+  animation: none;
+}
+
+#connectionStatus.reconnecting {
+  background-color: #fed7aa;
+  border-color: #fdba74;
+}
+
+#connectionStatus.reconnecting #connectionDot {
+  background-color: #f97316;
+  animation: pulse 0.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+```
+
+**JavaScript (Add to both host.js and participant.js)**:
+```javascript
+// Connection status management
+const connectionStatus = {
+  badge: null,
+  dot: null,
+  text: null,
+  
+  init() {
+    this.badge = document.getElementById('connectionStatus');
+    this.dot = document.getElementById('connectionDot');
+    this.text = document.getElementById('connectionText');
+  },
+  
+  setState(state, message = null) {
+    if (!this.badge) return;
+    
+    // Remove all state classes
+    this.badge.classList.remove('connected', 'connecting', 'disconnected', 'reconnecting');
+    
+    // Add new state
+    this.badge.classList.add(state);
+    
+    // Update text
+    const messages = {
+      connected: 'Connected',
+      connecting: 'Connecting...',
+      disconnected: 'Disconnected',
+      reconnecting: 'Reconnecting...'
+    };
+    
+    this.text.textContent = message || messages[state] || state;
+  }
+};
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+  connectionStatus.init();
+  connectionStatus.setState('connecting');
+});
+
+// Socket.IO connection event handlers
+socket.on('connect', () => {
+  console.log('WebSocket connected');
+  connectionStatus.setState('connected');
+  
+  // Optional: Show brief success notification
+  showConnectionNotification('Connected to server', 'success');
+});
+
+socket.on('disconnect', (reason) => {
+  console.log('WebSocket disconnected:', reason);
+  connectionStatus.setState('disconnected', 'Connection lost');
+  
+  // Show persistent notification
+  showConnectionNotification('Lost connection to server. Attempting to reconnect...', 'error', true);
+});
+
+socket.on('connect_error', (error) => {
+  console.error('Connection error:', error);
+  connectionStatus.setState('reconnecting');
+});
+
+socket.on('reconnect_attempt', (attemptNumber) => {
+  console.log('Reconnection attempt:', attemptNumber);
+  connectionStatus.setState('reconnecting', `Reconnecting... (${attemptNumber})`);
+});
+
+socket.on('reconnect', (attemptNumber) => {
+  console.log('Reconnected after', attemptNumber, 'attempts');
+  connectionStatus.setState('connected');
+  
+  // Show success notification
+  showConnectionNotification('Reconnected successfully!', 'success');
+  
+  // Attempt to rejoin room if we were in one
+  if (currentPin && currentName) {
+    socket.emit('rejoin_room', {
+      pin: currentPin,
+      name: currentName,
+      was_host: isHost  // Track this appropriately
+    });
+  }
+});
+
+socket.on('reconnect_failed', () => {
+  console.error('Reconnection failed');
+  connectionStatus.setState('disconnected', 'Unable to reconnect');
+  
+  showConnectionNotification(
+    'Unable to reconnect. Please refresh the page.',
+    'error',
+    true
+  );
+});
+
+// Connection notification toast
+function showConnectionNotification(message, type = 'info', persistent = false) {
+  const toast = document.createElement('div');
+  toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 transform transition-all ${
+    type === 'success' ? 'bg-green-500' :
+    type === 'error' ? 'bg-red-500' :
+    'bg-blue-500'
+  } text-white font-medium`;
+  toast.textContent = message;
+  
+  document.body.appendChild(toast);
+  
+  // Slide in animation
+  setTimeout(() => toast.classList.add('translate-y-0'), 10);
+  
+  // Auto-remove after 5 seconds unless persistent
+  if (!persistent) {
+    setTimeout(() => {
+      toast.classList.add('opacity-0');
+      setTimeout(() => toast.remove(), 300);
+    }, 5000);
+  }
+}
+
+// Periodic connection health check
+setInterval(() => {
+  if (socket.connected) {
+    connectionStatus.setState('connected');
+  } else {
+    connectionStatus.setState('disconnected');
+  }
+}, 5000);
+```
+
+**Enhanced with Latency Monitoring**:
+```javascript
+// Add latency monitoring
+let lastPingTime = null;
+let latency = null;
+
+function measureLatency() {
+  lastPingTime = Date.now();
+  socket.emit('ping', { timestamp: lastPingTime });
+}
+
+socket.on('pong', (data) => {
+  if (lastPingTime) {
+    latency = Date.now() - lastPingTime;
+    
+    // Update connection status with latency
+    let latencyText = '';
+    if (latency < 100) {
+      latencyText = `Connected (${latency}ms) • Excellent`;
+    } else if (latency < 300) {
+      latencyText = `Connected (${latency}ms) • Good`;
+    } else if (latency < 500) {
+      latencyText = `Connected (${latency}ms) • Fair`;
+    } else {
+      latencyText = `Connected (${latency}ms) • Slow`;
+    }
+    
+    connectionStatus.setState('connected', latencyText);
+  }
+});
+
+// Measure latency every 10 seconds when connected
+setInterval(() => {
+  if (socket.connected) {
+    measureLatency();
+  }
+}, 10000);
+
+// Backend ping handler
+@socketio.on('ping')
+def handle_ping(data):
+    emit('pong', data)
+```
+
+**Benefits**:
+1. **Transparency**: Users know if they're connected
+2. **Network Issues**: Immediate feedback on connection problems
+3. **Latency Awareness**: Optional display of connection quality
+4. **Automatic Reconnection**: Visual feedback during reconnect attempts
+5. **Professional Feel**: Shows app is monitoring connection health
+
+**Visual States**:
+- 🟢 **Connected** - Green badge, pulsing dot
+- 🟡 **Connecting** - Yellow badge, faster pulse
+- 🔴 **Disconnected** - Red badge, solid dot
+- 🟠 **Reconnecting** - Orange badge, rapid pulse
+
+### 4.5 Database Persistence (Future Scalability)
 
 **Issue**: All data in memory, lost on restart. No game history or analytics.
 
@@ -1357,6 +1623,474 @@ function playAgain() {
 
 ---
 
+## 8. ADVANCED FEATURE: PLAYLIST QUEUE & TOURNAMENT MODE
+
+### 8.1 Multi-Playlist Sequential Games
+
+**Concept**: Allow hosts to queue multiple playlists for consecutive games with cumulative scoring across all games.
+
+**Use Cases**:
+- Marathon sessions with genre variety
+- Tournament-style competitions
+- Progressive difficulty (easy playlist → hard playlist)
+- Theme nights (90s → 2000s → 2010s)
+
+**Architecture Overview**:
+
+```python
+# Extended Room class for tournaments
+class TournamentRoom(Room):
+    def __init__(self, pin, host_sid, playlist_queue, token_info=None):
+        super().__init__(pin, host_sid, playlist_queue[0], token_info)
+        self.playlist_queue = playlist_queue  # List of playlist IDs
+        self.current_playlist_index = 0
+        self.game_sessions = []  # Track each game's results
+        self.cumulative_scores = {}  # player_sid -> total score across all games
+        self.tournament_mode = True
+        
+    def start_next_playlist_game(self):
+        """Move to next playlist in queue"""
+        self.current_playlist_index += 1
+        
+        if self.current_playlist_index >= len(self.playlist_queue):
+            return False  # Tournament complete
+        
+        # Save current game session
+        self.game_sessions.append({
+            'playlist_id': self.playlist_id,
+            'questions': self.questions,
+            'answers': self.answers,
+            'scores': self.get_scores()
+        })
+        
+        # Reset for next game
+        self.playlist_id = self.playlist_queue[self.current_playlist_index]
+        self.questions = []
+        self.question_index = 0
+        self.answers = {}
+        self.voting_closed = False
+        
+        # Keep cumulative scores but reset round scores
+        for sid in self.participants:
+            self.cumulative_scores[sid] = self.cumulative_scores.get(sid, 0) + self.participants[sid]['score']
+            self.participants[sid]['score'] = 0
+        
+        return True  # More games to play
+    
+    def get_tournament_standings(self):
+        """Get overall standings across all games"""
+        standings = []
+        for sid, participant in self.participants.items():
+            total_score = self.cumulative_scores.get(sid, 0) + participant['score']
+            standings.append({
+                'name': participant['name'],
+                'total_score': total_score,
+                'games_played': len(self.game_sessions) + 1,
+                'current_game_score': participant['score'],
+                'sid': sid
+            })
+        
+        standings.sort(key=lambda x: -x['total_score'])
+        return standings
+```
+
+### 8.2 Frontend: Playlist Queue Selection
+
+**Host Playlist Selection UI Enhancement**:
+
+```html
+<!-- In host.html - Enhanced playlist selection -->
+<div id="playlistSelector" class="hidden">
+  <div class="flex items-center justify-between mb-4">
+    <label class="text-lg font-semibold text-gray-800">Select Playlists:</label>
+    <div class="flex gap-3">
+      <input type="text" id="playlistSearch" placeholder="Search playlists..." 
+        class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary w-64">
+      <button id="toggleTournamentMode" onclick="toggleTournamentMode()" 
+        class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+        <span id="tournamentModeIcon">🏆</span>
+        <span id="tournamentModeText">Tournament Mode: OFF</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Queue Display -->
+  <div id="playlistQueue" class="hidden mb-6 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-300 rounded-xl">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-bold text-gray-800">📋 Playlist Queue (<span id="queueCount">0</span>)</h4>
+      <button onclick="clearQueue()" class="text-sm text-red-600 hover:text-red-700">Clear All</button>
+    </div>
+    <div id="queuedPlaylists" class="flex flex-wrap gap-2"></div>
+    <p class="text-sm text-gray-600 mt-2">
+      Games will be played sequentially. Scores accumulate across all playlists.
+    </p>
+  </div>
+
+  <!-- Playlist Grid with multi-select support -->
+  <div id="playlistGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+</div>
+```
+
+**JavaScript Enhancement**:
+
+```javascript
+// host.js additions
+let tournamentMode = false;
+let playlistQueue = [];
+
+function toggleTournamentMode() {
+  tournamentMode = !tournamentMode;
+  const modeText = document.getElementById('tournamentModeText');
+  const queueDisplay = document.getElementById('playlistQueue');
+  
+  if (tournamentMode) {
+    modeText.textContent = 'Tournament Mode: ON';
+    queueDisplay.classList.remove('hidden');
+  } else {
+    modeText.textContent = 'Tournament Mode: OFF';
+    queueDisplay.classList.add('hidden');
+    playlistQueue = [];
+    updateQueueDisplay();
+  }
+}
+
+function selectPlaylist(playlist) {
+  if (tournamentMode) {
+    // Multi-select mode
+    const index = playlistQueue.findIndex(p => p.id === playlist.id);
+    
+    if (index >= 0) {
+      // Deselect
+      playlistQueue.splice(index, 1);
+      document.querySelector(`[data-playlist-id="${playlist.id}"]`).classList.remove('selected-queue');
+    } else {
+      // Add to queue
+      playlistQueue.push(playlist);
+      document.querySelector(`[data-playlist-id="${playlist.id}"]`).classList.add('selected-queue');
+    }
+    
+    updateQueueDisplay();
+  } else {
+    // Single select mode (existing behavior)
+    selectedPlaylistId = playlist.id;
+    // ... existing single selection code ...
+  }
+}
+
+function updateQueueDisplay() {
+  const queueContainer = document.getElementById('queuedPlaylists');
+  const queueCount = document.getElementById('queueCount');
+  
+  queueCount.textContent = playlistQueue.length;
+  queueContainer.innerHTML = '';
+  
+  playlistQueue.forEach((playlist, index) => {
+    const badge = document.createElement('div');
+    badge.className = 'flex items-center gap-2 bg-white px-3 py-2 rounded-lg shadow-sm border border-purple-200';
+    badge.innerHTML = `
+      <span class="font-semibold text-purple-600">${index + 1}.</span>
+      <span class="text-sm font-medium">${playlist.name}</span>
+      <button onclick="removeFromQueue(${index})" class="text-red-500 hover:text-red-700 ml-2">×</button>
+    `;
+    queueContainer.appendChild(badge);
+  });
+}
+
+function removeFromQueue(index) {
+  const playlist = playlistQueue[index];
+  playlistQueue.splice(index, 1);
+  
+  // Update UI
+  document.querySelector(`[data-playlist-id="${playlist.id}"]`).classList.remove('selected-queue');
+  updateQueueDisplay();
+}
+
+function clearQueue() {
+  playlistQueue.forEach(playlist => {
+    document.querySelector(`[data-playlist-id="${playlist.id}"]`).classList.remove('selected-queue');
+  });
+  playlistQueue = [];
+  updateQueueDisplay();
+}
+
+// Modified create room
+createRoomBtn.addEventListener('click', () => {
+  if (tournamentMode && playlistQueue.length === 0) {
+    showErrorModal('No Playlists Selected', 'Please select at least one playlist for tournament mode.');
+    return;
+  }
+  
+  if (!tournamentMode && !selectedPlaylistId) {
+    showErrorModal('No Playlist Selected', 'Please select a playlist.');
+    return;
+  }
+  
+  const payload = tournamentMode 
+    ? { 
+        playlist_ids: playlistQueue.map(p => p.id),
+        tournament_mode: true 
+      }
+    : { 
+        playlist_id: selectedPlaylistId,
+        tournament_mode: false 
+      };
+  
+  socket.emit('create_room', payload);
+});
+```
+
+### 8.3 Backend Implementation
+
+**Room Creation Handler**:
+
+```python
+@socketio.on('create_room')
+def handle_create_room(data):
+    tournament_mode = data.get('tournament_mode', False)
+    pin = generate_pin()
+    token_info = session.get('spotify_token') or spotify_tokens.get(request.sid)
+    
+    if tournament_mode:
+        # Create tournament room
+        playlist_ids = data.get('playlist_ids', [])
+        
+        if len(playlist_ids) < 1:
+            emit('error', {'message': 'At least one playlist required for tournament'})
+            return
+        
+        room = TournamentRoom(pin, request.sid, playlist_ids, token_info)
+    else:
+        # Single game room
+        playlist_id = data.get('playlist_id', '')
+        room = Room(pin, request.sid, playlist_id, token_info)
+    
+    rooms[pin] = room
+    join_room(pin)
+    
+    emit('room_created', {
+        'pin': pin,
+        'tournament_mode': tournament_mode,
+        'playlist_count': len(playlist_ids) if tournament_mode else 1,
+        'authenticated': token_info is not None
+    })
+```
+
+**Game Transition Handler**:
+
+```python
+@socketio.on('next_playlist')
+def handle_next_playlist(data):
+    """Move to next playlist in tournament"""
+    pin = data.get('pin')
+    
+    if pin not in rooms:
+        emit('error', {'message': 'Room not found'})
+        return
+    
+    room = rooms[pin]
+    
+    if not isinstance(room, TournamentRoom):
+        emit('error', {'message': 'Not a tournament room'})
+        return
+    
+    if room.host_sid != request.sid:
+        emit('error', {'message': 'Only host can advance'})
+        return
+    
+    # Check if more playlists remain
+    has_next = room.start_next_playlist_game()
+    
+    if has_next:
+        # Show inter-game standings
+        socketio.emit('inter_game_standings', {
+            'current_game': room.current_playlist_index,
+            'total_games': len(room.playlist_queue),
+            'standings': room.get_tournament_standings(),
+            'next_playlist_id': room.playlist_id
+        }, room=pin)
+        
+        # Prepare next game
+        emit('preparing_next_game', {
+            'game_number': room.current_playlist_index + 1,
+            'total_games': len(room.playlist_queue)
+        }, room=pin)
+        
+        # Start next game
+        # ... fetch tracks and start game ...
+    else:
+        # Tournament complete
+        socketio.emit('tournament_ended', {
+            'final_standings': room.get_tournament_standings(),
+            'total_games_played': len(room.game_sessions) + 1,
+            'game_history': room.game_sessions
+        }, room=pin)
+```
+
+### 8.4 Tournament Standings UI
+
+**Inter-Game Standings Modal**:
+
+```html
+<!-- In host.html -->
+<div id="tournamentStandingsModal" class="modal hidden">
+  <div class="modal-backdrop" onclick="closeTournamentStandings()"></div>
+  <div class="modal-content max-w-3xl">
+    <div class="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-4 rounded-t-2xl">
+      <h2 class="text-2xl font-bold">🏆 Tournament Standings</h2>
+      <p class="text-purple-100">Game <span id="currentGameNum">1</span> of <span id="totalGamesNum">3</span> Complete</p>
+    </div>
+    
+    <div class="p-6">
+      <!-- Current Standings -->
+      <div class="mb-6">
+        <h3 class="text-lg font-bold text-gray-800 mb-3">Overall Standings</h3>
+        <div id="tournamentStandingsList" class="space-y-2"></div>
+      </div>
+      
+      <!-- Last Game Stats -->
+      <div class="bg-gray-50 rounded-lg p-4">
+        <h4 class="font-semibold text-gray-700 mb-2">Last Game Performance</h4>
+        <div id="lastGameStats" class="text-sm text-gray-600"></div>
+      </div>
+      
+      <!-- Continue Button (Host Only) -->
+      <button id="continueToNextGame" onclick="startNextPlaylist()" 
+        class="w-full mt-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-4 rounded-lg hover:from-purple-700 hover:to-indigo-700">
+        Continue to Game <span id="nextGameNum">2</span> 🎵
+      </button>
+    </div>
+  </div>
+</div>
+```
+
+**JavaScript Tournament Handlers**:
+
+```javascript
+// host.js
+socket.on('inter_game_standings', (data) => {
+  displayTournamentStandings(data);
+  
+  // Auto-continue after 10 seconds or wait for host click
+  let countdown = 10;
+  const countdownInterval = setInterval(() => {
+    countdown--;
+    document.getElementById('continueToNextGame').textContent = 
+      `Continue to Game ${data.current_game + 1} (${countdown}s)`;
+    
+    if (countdown <= 0) {
+      clearInterval(countdownInterval);
+      startNextPlaylist();
+    }
+  }, 1000);
+});
+
+socket.on('tournament_ended', (data) => {
+  displayFinalTournamentResults(data);
+});
+
+function displayTournamentStandings(data) {
+  const modal = document.getElementById('tournamentStandingsModal');
+  const standingsList = document.getElementById('tournamentStandingsList');
+  
+  document.getElementById('currentGameNum').textContent = data.current_game;
+  document.getElementById('totalGamesNum').textContent = data.total_games;
+  document.getElementById('nextGameNum').textContent = data.current_game + 1;
+  
+  // Display standings
+  standingsList.innerHTML = '';
+  data.standings.forEach((player, index) => {
+    const item = document.createElement('div');
+    item.className = 'flex items-center justify-between bg-white p-3 rounded-lg shadow-sm';
+    item.innerHTML = `
+      <div class="flex items-center gap-3">
+        <span class="text-2xl font-bold ${index < 3 ? 'text-yellow-500' : 'text-gray-400'}">
+          ${index + 1}${index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : ''}
+        </span>
+        <div>
+          <p class="font-semibold">${player.name}</p>
+          <p class="text-xs text-gray-500">${player.games_played} games played</p>
+        </div>
+      </div>
+      <div class="text-right">
+        <p class="text-2xl font-bold text-purple-600">${player.total_score}</p>
+        <p class="text-xs text-gray-500">+${player.current_game_score} this game</p>
+      </div>
+    `;
+    standingsList.appendChild(item);
+  });
+  
+  modal.classList.remove('hidden');
+}
+
+function startNextPlaylist() {
+  socket.emit('next_playlist', { pin: currentPin });
+  document.getElementById('tournamentStandingsModal').classList.add('hidden');
+}
+```
+
+### 8.5 Database Schema for Tournaments
+
+```python
+# Extended schema
+c.execute('''
+    CREATE TABLE IF NOT EXISTS tournaments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pin TEXT NOT NULL,
+        created_at TIMESTAMP,
+        ended_at TIMESTAMP,
+        total_games INTEGER,
+        total_players INTEGER
+    )
+''')
+
+c.execute('''
+    CREATE TABLE IF NOT EXISTS tournament_games (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tournament_id INTEGER,
+        game_number INTEGER,
+        playlist_id TEXT,
+        questions_count INTEGER,
+        FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
+    )
+''')
+
+c.execute('''
+    CREATE TABLE IF NOT EXISTS tournament_participants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tournament_id INTEGER,
+        name TEXT,
+        final_total_score INTEGER,
+        games_completed INTEGER,
+        FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
+    )
+''')
+```
+
+### 8.6 Benefits & Use Cases
+
+**Benefits**:
+1. **Extended Engagement** - Longer gaming sessions with variety
+2. **Fair Competition** - More questions = more accurate skill assessment
+3. **Progressive Challenge** - Start easy, increase difficulty
+4. **Theme Flexibility** - Mix genres, eras, artists
+5. **Tournament Format** - Professional competition structure
+
+**Use Cases**:
+- **Music Trivia Nights** - Host multi-hour events
+- **Office Competitions** - Weekly tournaments with accumulated scores
+- **Educational** - Teaching music history through themed playlists
+- **Party Mode** - Keep the fun going without manual restarts
+- **Streamer Content** - Long-form engaging content for audiences
+
+**Future Enhancements**:
+- Bracket elimination (losers drop after each round)
+- Team tournaments (2v2, 3v3)
+- Handicap system for mixed skill levels
+- Playlist recommendations based on performance
+- Export tournament results to PDF/CSV
+
+---
+
 ## CONCLUSION
 
 Your blindtest application has a **solid foundation** with good architecture and user experience. The proposed improvements focus on:
@@ -1366,6 +2100,7 @@ Your blindtest application has a **solid foundation** with good architecture and
 3. **Engagement**: Progressive difficulty, streaks, better feedback
 4. **Professionalism**: Mobile support, accessibility, logging
 5. **Scalability**: Database persistence, rate limiting, monitoring
+6. **Tournament Mode**: Multi-playlist queuing for extended competitive play
 
 **Recommended Starting Point**: Implement Phase 1 (Critical Reliability) first, then cherry-pick Quick Wins for immediate polish.
 
