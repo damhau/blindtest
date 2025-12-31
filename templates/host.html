@@ -469,18 +469,6 @@
   <script src="{{ url_for('static', filename='js/host.js') }}"></script>
 
   <script>
-    // Toggle user menu
-    document.addEventListener('click', function (e) {
-      const userMenuButton = document.getElementById('userMenuButton');
-      const userMenu = document.getElementById('userMenu');
-
-      if (userMenuButton && userMenuButton.contains(e.target)) {
-        userMenu.classList.toggle('hidden');
-      } else if (userMenu && !userMenu.contains(e.target)) {
-        userMenu.classList.add('hidden');
-      }
-    });
-
     // Check auth and display user profile if logged in
     fetch('/check_auth')
       .then(res => res.json())
@@ -489,18 +477,6 @@
           document.getElementById('userProfile').classList.remove('hidden');
           document.getElementById('userProfile').classList.add('block');
           document.getElementById('loginButton').classList.add('hidden');
-
-          // Fetch and display user info
-          fetch('/me')
-            .then(res => res.json())
-            .then(userData => {
-              const avatar = document.getElementById('userAvatar');
-              const displayName = userData.display_name || userData.id || 'User';
-
-              // Use DiceBear avatar with initial - using purple/indigo theme
-              avatar.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
-            })
-            .catch(err => console.error('Failed to fetch user info:', err));
         } else {
           document.getElementById('loginButton').classList.remove('hidden');
           document.getElementById('loginButton').classList.add('flex');

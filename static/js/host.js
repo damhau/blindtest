@@ -1406,15 +1406,21 @@ async function loadUserProfile() {
 
 function updateProfileUI(profile) {
   // Update avatar images
+  const displayName = profile.display_name || 'User';
+  const userAvatar = document.getElementById('userAvatar');
+  const menuAvatar = document.getElementById('menuAvatar');
+  
   if (profile.profile_image) {
-    const userAvatar = document.getElementById('userAvatar');
-    const menuAvatar = document.getElementById('menuAvatar');
     if (userAvatar) userAvatar.src = profile.profile_image;
     if (menuAvatar) menuAvatar.src = profile.profile_image;
+  } else {
+    // Use DiceBear avatar with initials as fallback
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
+    if (userAvatar) userAvatar.src = avatarUrl;
+    if (menuAvatar) menuAvatar.src = avatarUrl;
   }
 
   // Update display name
-  const displayName = profile.display_name || 'User';
   const menuUserName = document.getElementById('menuUserName');
   if (menuUserName) menuUserName.textContent = displayName;
 

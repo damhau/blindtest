@@ -244,18 +244,6 @@
   </div>
 
   <script>
-    // Toggle user menu
-    document.addEventListener('click', function (e) {
-      const userMenuButton = document.getElementById('userMenuButton');
-      const userMenu = document.getElementById('userMenu');
-
-      if (userMenuButton && userMenuButton.contains(e.target)) {
-        userMenu.classList.toggle('hidden');
-      } else if (userMenu && !userMenu.contains(e.target)) {
-        userMenu.classList.add('hidden');
-      }
-    });
-
     // Check auth and display user profile if logged in
     fetch('/check_auth')
       .then(res => res.json())
@@ -264,19 +252,6 @@
           document.getElementById('userProfile').classList.remove('hidden');
           document.getElementById('userProfile').classList.add('block');
           document.getElementById('loginButton').classList.add('hidden');
-
-          // Fetch and display user info
-          fetch('/me')
-            .then(res => res.json())
-            .then(userData => {
-              const avatar = document.getElementById('userAvatar');
-              const displayName = userData.display_name || userData.id || 'User';
-              const initial = displayName.charAt(0).toUpperCase();
-
-              // Use DiceBear avatar with initial - using purple/indigo theme
-              avatar.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
-            })
-            .catch(err => console.error('Failed to fetch user info:', err));
         } else {
           document.getElementById('loginButton').classList.remove('hidden');
           document.getElementById('loginButton').classList.add('flex');
@@ -304,15 +279,21 @@
 
     function updateProfileUI(profile) {
       // Update avatar images
+      const displayName = profile.display_name || 'User';
+      const userAvatar = document.getElementById('userAvatar');
+      const menuAvatar = document.getElementById('menuAvatar');
+      
       if (profile.profile_image) {
-        const userAvatar = document.getElementById('userAvatar');
-        const menuAvatar = document.getElementById('menuAvatar');
         if (userAvatar) userAvatar.src = profile.profile_image;
         if (menuAvatar) menuAvatar.src = profile.profile_image;
+      } else {
+        // Use DiceBear avatar with initials as fallback
+        const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
+        if (userAvatar) userAvatar.src = avatarUrl;
+        if (menuAvatar) menuAvatar.src = avatarUrl;
       }
 
       // Update display name
-      const displayName = profile.display_name || 'User';
       const menuUserName = document.getElementById('menuUserName');
       if (menuUserName) menuUserName.textContent = displayName;
 
@@ -438,6 +419,20 @@
     document.addEventListener('DOMContentLoaded', () => {
       loadUserProfile();
       loadUserSettings();
+    });
+
+    // Toggle user menu
+    document.addEventListener('click', function (e) {
+      const userMenuButton = document.getElementById('userMenuButton');
+      const userMenu = document.getElementById('userMenu');
+
+      if (!userMenuButton || !userMenu) return;
+
+      if (userMenuButton.contains(e.target)) {
+        userMenu.classList.toggle('hidden');
+      } else if (!userMenu.contains(e.target)) {
+        userMenu.classList.add('hidden');
+      }
     });
 
     // Close settings modal on Escape
