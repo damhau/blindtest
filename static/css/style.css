@@ -315,48 +315,73 @@ small {
 /* Auth badge */
 .auth-status-container {
   margin-bottom: 20px;
+  padding: 15px;
+  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+  border-radius: 10px;
+  border-left: 4px solid #4CAF50;
+}
+
+.auth-badge-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
 .auth-badge {
-  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-  color: white;
-  padding: 10px 15px;
-  border-radius: 8px;
-  font-weight: bold;
-  margin-bottom: 10px;
-  display: inline-block;
+  color: #2e7d32;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.auth-info {
+  display: block;
+  color: #558b2f;
+  font-size: 0.85rem;
+  margin: 0;
 }
 
 .btn-logout {
   display: inline-block;
-  padding: 5px 15px;
-  background: #f44336;
-  color: white;
+  padding: 6px 16px;
+  background: transparent;
+  color: #d32f2f;
   text-decoration: none;
-  border-radius: 5px;
-  font-size: 0.9rem;
-  margin-left: 10px;
-  transition: background 0.3s;
+  border: 1px solid #d32f2f;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  transition: all 0.3s;
+  font-weight: 500;
 }
 
 .btn-logout:hover {
   background: #d32f2f;
+  color: white;
 }
 
 .login-options {
-  margin-top: 15px;
-  padding-top: 15px;
-  border-top: 1px solid #eee;
+  margin-top: 20px;
+  padding: 15px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.login-options p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
 }
 
 .link-login {
   color: #667eea;
   text-decoration: none;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .link-login:hover {
   text-decoration: underline;
+  color: #764ba2;
 }
 
 /* Playlist Selector */
@@ -375,14 +400,20 @@ small {
   border-radius: 10px;
   padding: 15px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.2s ease;
   text-align: center;
+  transform-origin: center center;
 }
 
 .playlist-card:hover {
   border-color: #667eea;
   transform: translateY(-2px);
   box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+}
+
+.playlist-card:active {
+  transform: scale(0.92);
+  box-shadow: 0 1px 4px rgba(102, 126, 234, 0.6);
 }
 
 .playlist-card.selected {
@@ -393,7 +424,7 @@ small {
 
 .playlist-card img {
   width: 100%;
-  height: 150px;
+  height: 100px;
   object-fit: cover;
   border-radius: 8px;
   margin-bottom: 10px;
@@ -401,7 +432,7 @@ small {
 
 .playlist-card .no-image {
   width: 100%;
-  height: 150px;
+  height: 100px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   display: flex;
   align-items: center;
@@ -675,19 +706,15 @@ small {
 }
 
 .answer-option.correct {
-  animation: pulse 0.5s ease;
-  box-shadow: 0 0 30px rgba(76, 175, 80, 0.8);
-  border: 3px solid #4CAF50;
+  /* Removed - no longer using animations */
 }
 
 .answer-option.correct .checkmark {
-  display: block;
+  /* Removed - no longer using animations */
 }
 
 .answer-option.incorrect {
-  opacity: 0.3;
-  filter: grayscale(100%);
-  transition: all 0.5s ease;
+  /* Removed - no longer using animations */
 }
 
 @keyframes checkmarkAppear {

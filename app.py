@@ -6,6 +6,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
+import spotipy
 from spotify_service import get_spotify_service
 from spotify_oauth_service import get_spotify_oauth_service
 from openai_service import get_openai_service
@@ -42,6 +43,9 @@ class Room:
         self.questions = []
         self.state = 'waiting'  # waiting, playing, ended
         self.answers = {}  # question_index -> {sid -> answer}
+        self.voting_closed = False  # Track if current question voting is closed
+        self.correct_answer_acks = set()  # Track participants who saw the correct answer
+        self.standings_ready_acks = set()  # Track participants ready for next question
         self.created_at = datetime.now()
         self.colors = ['red', 'blue', 'yellow', 'green']
 
@@ -104,7 +108,22 @@ class Room:
             return 4
     
     def calculate_speed_points(self, sid):
-        """Calculate points based on answer speed ranking among correct answers"""
+        """Calculate points based on ranking and response time
+        
+        Scoring formula:
+        1. Base score from ranking: S × (1 - α × (rank - 1))
+           - S = 100 points (max)
+           - α = 0.10 (10% decay per rank)
+           - Example: 1st=100pts, 2nd=90pts, 3rd=80pts
+        
+        2. Time coefficient: max(1 - β × (delta_t / T), factor_min)
+           - β = 0.12 (12% max penalty)
+           - T = 10 seconds (time window)
+           - factor_min = 0.85 (max 15% time penalty)
+           - delta_t = player_time - fastest_time
+        
+        3. Final score: base_score × time_factor
+        """
         current_answers = self.answers.get(self.question_index, {})
         correct_answer_index = self.current_question['correct_answer']
         
@@ -123,12 +142,32 @@ class Room:
         # Find rank of current player (1-indexed)
         rank = next((i + 1 for i, a in enumerate(correct_answers) if a['sid'] == sid), 1)
         
-        # Calculate points: 100 for 1st, halved for each subsequent rank, minimum 10
-        base_score = 100
-        min_score = 10
-        points = base_score / (2 ** (rank - 1))
+        # STEP 1: Base score from ranking
+        S = 100  # Maximum score
+        alpha = 0.10  # 10% decay per rank
+        score_base = S * (1 - alpha * (rank - 1))
         
-        return max(min_score, round(points))
+        # STEP 2: Time-based coefficient
+        # Get player's response time
+        player_time = next((a['timestamp'] for a in correct_answers if a['sid'] == sid), 0)
+        # Get fastest response time
+        t_min = correct_answers[0]['timestamp'] if correct_answers else 0
+        
+        # Calculate time delta in seconds
+        delta_t = (player_time - t_min).total_seconds()
+        
+        # Time parameters
+        T = 10  # Time window in seconds
+        beta = 0.12  # 12% max penalty over full window
+        factor_min = 0.85  # Minimum factor (max 15% time penalty)
+        
+        # Calculate time factor with floor
+        facteur_temps = max(1 - beta * (delta_t / T), factor_min)
+        
+        # STEP 3: Final score
+        final_score = score_base * facteur_temps
+        
+        return round(final_score)
     
     def generate_question(self, track, fake_artists):
         """Generate a question with correct answer and 3 fake options"""
@@ -208,7 +247,7 @@ def callback():
     session['authenticated'] = True
     
     # Redirect back to host page
-    return redirect('/host?authenticated=true')
+    return redirect('/?authenticated=true')
 
 
 @app.route('/check_auth')
@@ -227,21 +266,50 @@ def check_auth():
         return jsonify({'authenticated': False})
 
 
+@app.route('/me')
+def get_user_profile():
+    """Get current Spotify user profile"""
+    token_info = session.get('spotify_token')
+    if not token_info:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    if not spotify_oauth_service:
+        return jsonify({'error': 'Spotify OAuth service not available'}), 500
+    
+    try:
+        # Refresh token if needed
+        sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(token_info)
+        if not sp_client:
+            return jsonify({'error': 'Authentication expired'}), 401
+        
+        # Update session with refreshed token
+        if refreshed_token and refreshed_token != token_info:
+            session['spotify_token'] = refreshed_token
+        
+        user_info = sp_client.current_user()
+        return jsonify(user_info)
+    except Exception as e:
+        print(f"Error fetching user profile: {e}")
+        return jsonify({'error': 'Failed to fetch user profile'}), 500
+
+
 @app.route('/logout')
 def logout():
     """Clear Spotify authentication and cache"""
     session.clear()
     
-    # Also clear the Spotipy cache file if it exists
-    cache_path = '.cache'
-    if os.path.exists(cache_path):
-        try:
-            os.remove(cache_path)
-            print(f"Removed cached token at {cache_path}")
-        except Exception as e:
-            print(f"Could not remove cache file: {e}")
+    # Also clear Spotipy cache files if they exist
+    # - SpotifyOAuthService uses cache_path=".spotify_cache"
+    # - Some Spotipy flows default to ".cache"
+    for cache_path in ('.spotify_cache', '.cache'):
+        if os.path.exists(cache_path):
+            try:
+                os.remove(cache_path)
+                print(f"Removed cached token at {cache_path}")
+            except Exception as e:
+                print(f"Could not remove cache file {cache_path}: {e}")
     
-    return redirect('/host')
+    return redirect('/')
 
 
 @app.route('/clear_session')
@@ -285,7 +353,7 @@ def my_playlists():
         
         # Update session with refreshed token if changed
         if refreshed_token and refreshed_token != token_info:
-            session['token_info'] = refreshed_token
+            session['spotify_token'] = refreshed_token
         
         # Get user's playlists with pagination
         playlists = []
@@ -379,8 +447,9 @@ def handle_create_room(data):
     playlist_id = data.get('playlist_id', '')
     pin = generate_pin()
     
-    # Get token info for this host if authenticated
-    token_info = spotify_tokens.get(request.sid)
+    # Get token info for this host if authenticated.
+    # Prefer the current session token (so logout/login updates take effect immediately).
+    token_info = session.get('spotify_token') or spotify_tokens.get(request.sid)
     
     room = Room(pin, request.sid, playlist_id, token_info)
     rooms[pin] = room
@@ -463,8 +532,8 @@ def handle_start_game(data):
         if refreshed_token:
             room.token_info = refreshed_token
         
-        # Fetch more tracks than needed to randomize from
-        tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=50)
+        # Fetch larger pool (200 tracks) from random offset for better variety
+        tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=200, fetch_pool_size=200)
     elif spotify_service:
         # Fall back to basic service (preview URLs only)
         tracks, error = spotify_service.get_playlist_tracks(room.playlist_id, limit=50)
@@ -577,6 +646,150 @@ def send_question(pin):
         'total_questions': len(room.questions),
         'colors': question['colors']
     }, room=pin, skip_sid=room.host_sid)
+    
+    # Don't start timer automatically - wait for playback_started event from frontend
+    room.voting_closed = False  # Reset voting flag for new question
+
+
+@socketio.on('playback_started')
+def handle_playback_started(data):
+    pin = data.get('pin')
+    
+    if pin not in rooms:
+        return
+    
+    room = rooms[pin]
+    current_question_index = room.question_index
+    
+    print(f'Playback started for question {room.question_index + 1} in room {pin}, starting timer')
+    
+    # Notify all clients to start their timers
+    socketio.emit('start_question_timer', {}, room=pin)
+    
+    # Start timer now that playback has begun
+    def question_timeout():
+        socketio.sleep(10)
+        if pin in rooms and rooms[pin].question_index == current_question_index:
+            if not rooms[pin].voting_closed:
+                print(f'Question {current_question_index + 1} timeout in room {pin}')
+                socketio.emit('question_timeout', {}, room=pin)
+                close_voting_and_show_answer(pin)
+    
+    socketio.start_background_task(question_timeout)
+
+
+def close_voting_and_show_answer(pin):
+    """Unified flow when voting closes (timeout or all answered)"""
+    if pin not in rooms:
+        return
+    
+    room = rooms[pin]
+    room.voting_closed = True
+    room.correct_answer_acks = set()
+    
+    print(f'Closing voting for question {room.question_index + 1} in room {pin}')
+    
+    # Show correct answer immediately (no delay)
+    socketio.emit('show_correct_answer', {
+        'correct_answer': room.current_question['correct_answer'],
+        'correct_artist': room.current_question['correct_artist']
+    }, room=pin)
+    
+    # Wait for all participants to acknowledge (max 2 seconds)
+    participant_count = len(room.participants)
+    max_wait = 2.0
+    wait_interval = 0.1
+    waited = 0.0
+    
+    while waited < max_wait and len(room.correct_answer_acks) < participant_count:
+        socketio.sleep(wait_interval)
+        waited += wait_interval
+    
+    print(f'Participants acknowledged: {len(room.correct_answer_acks)}/{participant_count} after {waited:.1f}s')
+    
+    # Always show standings to host (even for last question)
+    # This ensures host and participants can see the final results
+    socketio.emit('show_intermediate_scores', {
+        'scores': room.get_scores(),
+        'is_last_question': (room.question_index + 1) >= len(room.questions)
+    }, room=pin, to=room.host_sid)
+
+
+@socketio.on('correct_answer_displayed')
+def handle_correct_answer_displayed(data):
+    pin = data.get('pin')
+    sid = request.sid
+    
+    if pin in rooms and sid in rooms[pin].participants:
+        rooms[pin].correct_answer_acks.add(sid)
+        print(f'Participant {rooms[pin].participants[sid]["name"]} acknowledged correct answer in room {pin}')
+
+
+@socketio.on('standings_displayed')
+def handle_standings_displayed(data):
+    pin = data.get('pin')
+    
+    if pin not in rooms:
+        return
+    
+    print(f'Host displayed standings for room {pin}')
+    
+    # Reset ready acknowledgments
+    rooms[pin].standings_ready_acks = set()
+    
+    # Record when standings were displayed
+    import time
+    standings_shown_at = time.time()
+    
+    # Wait for participants to be ready with minimum display time
+    def wait_for_ready():
+        min_display_time = 7.0  # Minimum 7 seconds display
+        max_wait = 15.0  # Increased from 10 to accommodate min display time
+        wait_interval = 0.1
+        waited = 0.0
+        participant_count = len(rooms[pin].participants)
+        
+        # Wait for participants to be ready
+        while waited < max_wait and len(rooms[pin].standings_ready_acks) < participant_count:
+            socketio.sleep(wait_interval)
+            waited += wait_interval
+        
+        # Ensure minimum display time has elapsed
+        elapsed = time.time() - standings_shown_at
+        if elapsed < min_display_time:
+            remaining = min_display_time - elapsed
+            print(f'Enforcing minimum display time, waiting {remaining:.1f}s more')
+            socketio.sleep(remaining)
+        
+        ack_count = len(rooms[pin].standings_ready_acks)
+        total_time = time.time() - standings_shown_at
+        print(f'Ready for next: {ack_count}/{participant_count} after {total_time:.1f}s total display time')
+        
+        # Check if this was the last question
+        is_last_question = (rooms[pin].question_index + 1) >= len(rooms[pin].questions)
+        
+        if is_last_question:
+            # End the game
+            rooms[pin].state = 'ended'
+            socketio.emit('game_ended', {
+                'final_scores': rooms[pin].get_scores()
+            }, room=pin)
+            print(f'Game ended in room {pin}')
+        else:
+            # Auto-advance to next question
+            socketio.emit('advance_question', {}, room=pin, to=rooms[pin].host_sid)
+    
+    socketio.start_background_task(wait_for_ready)
+
+
+@socketio.on('ready_for_next')
+def handle_ready_for_next(data):
+    pin = data.get('pin')
+    sid = request.sid
+    
+    if pin in rooms and sid in rooms[pin].participants:
+        rooms[pin].standings_ready_acks.add(sid)
+        print(f'Participant {rooms[pin].participants[sid]["name"]} ready for next question')
 
 
 @socketio.on('submit_answer')
@@ -594,6 +807,16 @@ def handle_submit_answer(data):
         emit('error', {'message': 'You are not in this game'})
         return
     
+    # Check if voting is still open
+    if room.voting_closed:
+        emit('error', {'message': 'Voting has ended for this question'})
+        return
+    
+    # Check if player already answered this question
+    if room.question_index in room.answers and request.sid in room.answers[room.question_index]:
+        emit('error', {'message': 'You have already answered this question'})
+        return
+    
     # Record answer
     room.record_answer(request.sid, answer)
     
@@ -606,6 +829,11 @@ def handle_submit_answer(data):
         'your_score': room.participants[request.sid]['score']
     })
     
+    # Notify everyone that this player has answered
+    socketio.emit('player_answered', {
+        'player_name': room.participants[request.sid]['name']
+    }, room=pin)
+    
     # Update scores for everyone
     socketio.emit('scores_updated', {
         'scores': room.get_scores()
@@ -615,29 +843,16 @@ def handle_submit_answer(data):
     
     # Check if all participants have answered
     current_answers = room.answers.get(room.question_index, {})
-    if len(current_answers) == len(room.participants):
+    if len(current_answers) == len(room.participants) and not room.voting_closed:
         print(f'All {len(room.participants)} participants have answered question {room.question_index + 1}')
         
-        # Check if this is the last question
-        is_last_question = (room.question_index + 1) >= len(room.questions)
+        # Use same flow as timeout for consistency
+        def all_answered_flow():
+            socketio.sleep(0)  # Yield to allow last answer to be processed
+            if pin in rooms and not rooms[pin].voting_closed:
+                close_voting_and_show_answer(pin)
         
-        if is_last_question:
-            # Last question - end the game directly after showing correct answer
-            # Wait a moment for correct answer to be shown
-            def end_game_after_delay():
-                socketio.sleep(3)  # Wait 3 seconds to show correct answer
-                room.state = 'ended'
-                socketio.emit('game_ended', {
-                    'final_scores': room.get_scores()
-                }, room=pin)
-                print(f'Game ended in room {pin}')
-            
-            socketio.start_background_task(end_game_after_delay)
-        else:
-            # Show intermediate scores to host only
-            socketio.emit('show_intermediate_scores', {
-                'scores': room.get_scores()
-            }, room=pin, to=room.host_sid)
+        socketio.start_background_task(all_answered_flow)
 
 
 @socketio.on('next_question')
@@ -654,14 +869,12 @@ def handle_next_question(data):
         emit('error', {'message': 'Only host can advance questions'})
         return
     
-    # Reveal correct answer
-    socketio.emit('show_correct_answer', {
-        'correct_answer': room.current_question['correct_answer'],
-        'correct_artist': room.current_question['correct_artist']
-    }, room=pin)
+    # Note: correct answer already shown in close_voting_and_show_answer()
+    # No need to show it again here
     
     # Move to next question
     room.question_index += 1
+    room.voting_closed = False  # Reset for next question
     
     if room.question_index >= len(room.questions):
         # Game over

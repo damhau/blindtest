@@ -8,6 +8,8 @@ const socket = io({
 let currentPin = null;
 let currentName = null;
 let hasAnswered = false;
+let selectedAnswer = null;
+let readyForNextTimer = null;
 
 // DOM Elements
 const joinScreen = document.getElementById('joinScreen');
@@ -111,6 +113,7 @@ answerButtons.forEach(btn => {
     btn.classList.add('selected');
 
     hasAnswered = true;
+    selectedAnswer = answer;
 
     socket.emit('submit_answer', {
       pin: currentPin,
@@ -149,11 +152,21 @@ socket.on('game_started', (data) => {
 
 socket.on('new_question_participant', (data) => {
   hasAnswered = false;
+  selectedAnswer = null;
+
+  // Clear ready timer if still running
+  if (readyForNextTimer) {
+    clearTimeout(readyForNextTimer);
+    readyForNextTimer = null;
+  }
 
   // Reset buttons
-  answerButtons.forEach(btn => {
+  answerButtons.forEach((btn, index) => {
     btn.disabled = false;
     btn.classList.remove('selected');
+    btn.style.border = '';
+    // Reset button content to just the letter
+    btn.innerHTML = `<span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>`;
   });
 
   // Hide feedback
@@ -171,8 +184,65 @@ socket.on('scores_updated', (data) => {
 });
 
 socket.on('show_correct_answer', (data) => {
+  // Clear any existing timer to prevent duplicates
+  if (readyForNextTimer) {
+    clearTimeout(readyForNextTimer);
+    readyForNextTimer = null;
+  }
+
+  // Highlight the correct answer button with a checkmark
+  const correctIndex = data.correct_answer;
+  answerButtons.forEach((btn, index) => {
+    if (index === correctIndex) {
+      // Add checkmark to correct answer
+      btn.innerHTML = `
+        <div class="flex items-center justify-center gap-3">
+          <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
+          <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" fill="#10b981" opacity="0.3"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+      `;
+      btn.style.border = '4px solid #10b981';
+      btn.style.boxShadow = '0 0 20px rgba(16, 185, 129, 0.5)';
+    } else if (hasAnswered && selectedAnswer === index) {
+      // Add red X to wrong answer they selected
+      btn.innerHTML = `
+        <div class="flex items-center justify-center gap-3">
+          <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
+          <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" fill="#ef4444" opacity="0.3"/>
+            <path d="M8 8l8 8M16 8l-8 8"/>
+          </svg>
+        </div>
+      `;
+      btn.style.border = '4px solid #ef4444';
+      btn.style.boxShadow = '0 0 20px rgba(239, 68, 68, 0.5)';
+    }
+  });
+
   // Show which color was correct
   if (!hasAnswered) {
+    answerFeedback.classList.remove('hidden');
+    answerFeedback.className = 'feedback incorrect';
+    // answerFeedback.textContent = '⏱ Time\'s up!';
+  }
+
+  // Notify server that correct answer has been displayed
+  socket.emit('correct_answer_displayed', { pin: currentPin });
+
+  // After 5 seconds, signal ready for next
+  readyForNextTimer = setTimeout(() => {
+    socket.emit('ready_for_next', { pin: currentPin });
+    readyForNextTimer = null;
+  }, 5000);
+});
+
+socket.on('question_timeout', () => {
+  // Disable voting when time runs out
+  if (!hasAnswered) {
+    answerButtons.forEach(btn => btn.disabled = true);
     answerFeedback.classList.remove('hidden');
     answerFeedback.className = 'feedback incorrect';
     answerFeedback.textContent = '⏱ Time\'s up!';
@@ -204,9 +274,21 @@ function showScreen(screen) {
 function updateWaitingParticipants(participants) {
   waitingParticipants.innerHTML = '';
 
-  participants.forEach(p => {
+  // Random color palette for avatars
+  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
+
+  participants.forEach((p, index) => {
     const li = document.createElement('li');
-    li.textContent = p.name;
+    li.className = 'flex items-center gap-3 p-2 bg-gray-50 rounded-lg';
+
+    // Use random color based on player index
+    const color = colors[index % colors.length];
+    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name)}&backgroundColor=${color}&fontSize=40`;
+
+    li.innerHTML = `
+      <img src="${avatarUrl}" alt="${p.name}" class="w-8 h-8 rounded-full">
+      <span class="font-medium text-gray-800">${p.name}</span>
+    `;
     waitingParticipants.appendChild(li);
   });
 }
