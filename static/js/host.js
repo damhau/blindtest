@@ -1409,7 +1409,7 @@ function updateProfileUI(profile) {
   const displayName = profile.display_name || 'User';
   const userAvatar = document.getElementById('userAvatar');
   const menuAvatar = document.getElementById('menuAvatar');
-  
+
   if (profile.profile_image) {
     if (userAvatar) userAvatar.src = profile.profile_image;
     if (menuAvatar) menuAvatar.src = profile.profile_image;
