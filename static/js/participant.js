@@ -1,4 +1,9 @@
-const socket = io();
+// Force secure WebSocket when using HTTPS
+const socket = io({
+  transports: ['websocket', 'polling'],
+  secure: window.location.protocol === 'https:',
+  rejectUnauthorized: false
+});
 
 let currentPin = null;
 let currentName = null;

@@ -63,6 +63,20 @@
           <ul id="participants"></ul>
         </div>
 
+        <div class="song-count-selector">
+          <label for="songCountSlider">Number of songs: <span id="songCountValue">10</span></label>
+          <input type="range" id="songCountSlider" min="5" max="30" value="10" step="1">
+          <small>Select between 5 and 30 songs</small>
+        </div>
+
+        <div id="generatingProgress" class="progress-container hidden">
+          <h3>Generating questions...</h3>
+          <div class="progress-bar">
+            <div id="progressBarFill" class="progress-bar-fill"></div>
+          </div>
+          <p id="progressText">Preparing track 0 of <span id="progressTotalSongs">10</span></p>
+        </div>
+
         <button id="startGameBtn" class="btn btn-primary">Start Game</button>
       </div>
     </div>
@@ -76,6 +90,12 @@
       <div class="question-container">
         <h3>Who is the artist?</h3>
         <audio id="audioPlayer" controls></audio>
+        <div id="spotifyPlayerUI" class="spotify-player-ui hidden">
+          <div class="player-status">
+            <span class="status-icon">🎵</span>
+            <span id="playerTrackInfo">Playing via Spotify...</span>
+          </div>
+        </div>
 
         <div class="answers-grid">
           <div class="answer-option red" data-color="red">
@@ -114,6 +134,7 @@
   </div>
 
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script src="{{ url_for('static', filename='js/host.js') }}"></script>
 </body>
 

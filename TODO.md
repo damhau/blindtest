@@ -1,0 +1,4 @@
+- choisir les nom d'artiste
+- calculer les score avec la vitesse de reponse
+- passer a la chanson suivant automatiquement
+- monter la bonne reponse que une fois que tout le monde a voter

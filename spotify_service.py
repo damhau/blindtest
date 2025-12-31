@@ -102,23 +102,37 @@ class SpotifyService:
 
     def get_similar_artists(self, artist_name, limit=3):
         """
-        Get similar artists from Spotify (alternative to OpenAI for fake answers)
+        Get similar artists using genre search (related artists API deprecated)
         """
         try:
             # Search for the artist
             results = self.sp.search(q=f'artist:{artist_name}', type='artist', limit=1)
             
             if not results['artists']['items']:
+                print(f"No artist found for: {artist_name}")
                 return []
             
-            artist_id = results['artists']['items'][0]['id']
+            artist = results['artists']['items'][0]
+            artist_actual_name = artist['name']
+            genres = artist.get('genres', [])
             
-            # Get related artists
-            related = self.sp.artist_related_artists(artist_id)
+            print(f"Found artist {artist_actual_name}, genres: {genres[:2]}")
             
-            similar_names = [artist['name'] for artist in related['artists'][:limit]]
+            # Use genre-based search (related artists endpoint deprecated)
+            if genres:
+                try:
+                    genre_results = self.sp.search(q=f'genre:"{genres[0]}"', type='artist', limit=20)
+                    similar_names = [
+                        a['name'] for a in genre_results['artists']['items']
+                        if a['name'] != artist_actual_name
+                    ][:limit]
+                    print(f"Found {len(similar_names)} artists via genre search")
+                    return similar_names
+                except Exception as e:
+                    print(f"Genre search failed: {e}")
             
-            return similar_names
+            # Fallback: return empty and let app.py use generic names
+            return []
         
         except Exception as e:
             print(f"Error getting similar artists: {e}")

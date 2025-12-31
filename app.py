@@ -173,8 +173,18 @@ def check_auth():
 
 @app.route('/logout')
 def logout():
-    """Clear Spotify authentication"""
+    """Clear Spotify authentication and cache"""
     session.clear()
+    
+    # Also clear the Spotipy cache file if it exists
+    cache_path = '.cache'
+    if os.path.exists(cache_path):
+        try:
+            os.remove(cache_path)
+            print(f"Removed cached token at {cache_path}")
+        except Exception as e:
+            print(f"Could not remove cache file: {e}")
+    
     return redirect('/host')
 
 
@@ -183,6 +193,25 @@ def clear_session():
     """Force clear all session data"""
     session.clear()
     return jsonify({'message': 'Session cleared', 'success': True})
+
+
+@app.route('/spotify_token')
+def get_spotify_token():
+    """Get Spotify access token for Web Playback SDK"""
+    token_info = session.get('spotify_token')
+    
+    if not token_info:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    # Refresh token if needed
+    if spotify_oauth_service and spotify_oauth_service.sp_oauth.is_token_expired(token_info):
+        token_info = spotify_oauth_service.sp_oauth.refresh_access_token(token_info['refresh_token'])
+        session['spotify_token'] = token_info
+    
+    return jsonify({
+        'access_token': token_info.get('access_token'),
+        'expires_in': token_info.get('expires_in')
+    })
 
 
 @app.route('/my_playlists')
@@ -314,7 +343,13 @@ def handle_join_room(data):
 
 @socketio.on('start_game')
 def handle_start_game(data):
+    import random
+    
     pin = data.get('pin')
+    song_count = data.get('song_count', 10)  # Default to 10 if not provided
+    
+    # Validate song count
+    song_count = max(5, min(30, song_count))  # Clamp between 5 and 30
     
     if pin not in rooms:
         emit('error', {'message': 'Room not found'})
@@ -334,10 +369,11 @@ def handle_start_game(data):
             emit('error', {'message': 'Spotify authentication expired. Please log in again.'})
             return
         
-        tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=10)
+        # Fetch more tracks than needed to randomize from
+        tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=50)
     elif spotify_service:
         # Fall back to basic service (preview URLs only)
-        tracks, error = spotify_service.get_playlist_tracks(room.playlist_id, limit=10)
+        tracks, error = spotify_service.get_playlist_tracks(room.playlist_id, limit=50)
     else:
         emit('error', {'message': 'Spotify service not configured. Check your .env file.'})
         return
@@ -350,16 +386,47 @@ def handle_start_game(data):
         emit('error', {'message': 'No tracks found in playlist. Try a different playlist with more songs.'})
         return
     
+    # Randomize and select the requested number of songs
+    random.shuffle(tracks)
+    tracks = tracks[:song_count]
+    
+    # Check audio availability
+    tracks_with_audio = sum(1 for t in tracks if t.get('preview_url'))
+    
+    # Only block if no auth AND no previews
+    if not room.token_info and tracks_with_audio == 0:
+        emit('error', {'message': 'No tracks in this playlist have audio previews. Please login with Spotify or try a different playlist.'})
+        return
+    
+    # Warn about limited audio (but allow to continue if authenticated)
+    if tracks_with_audio < len(tracks):
+        print(f"Warning: Only {tracks_with_audio}/{len(tracks)} tracks have preview URLs")
+        if room.token_info:
+            print(f"User is authenticated - allowing game to proceed without preview URLs")
+    
     # Generate questions with fake artists
-    for track in tracks:
+    total_tracks = len(tracks)
+    for idx, track in enumerate(tracks, 1):
+        # Emit progress update
+        socketio.emit('question_progress', {
+            'current': idx,
+            'total': total_tracks
+        }, room=pin)
+        
+        # Yield control to allow event to be sent immediately
+        socketio.sleep(0)
+        
         if openai_service:
+            print(f"Using OpenAI to generate fake artists for track: {track['name']}")
             fake_artists = openai_service.generate_fake_artists(track['artist'], count=3)
         else:
             # Fallback: use similar artists from Spotify
             if room.token_info and spotify_oauth_service:
+                print(f"Using get_similar_artists to generate fake artists for track: {track['name']}")
                 sp_client = spotify_oauth_service.get_spotify_client(room.token_info)
                 fake_artists = spotify_oauth_service.get_similar_artists(sp_client, track['artist'], limit=3)
             elif spotify_service:
+                print(f"Using get_similar_artists to generate fake artists")
                 fake_artists = spotify_service.get_similar_artists(track['artist'], limit=3)
             else:
                 fake_artists = []

@@ -16,31 +16,31 @@ class OpenAIService:
 
     def generate_fake_artists(self, correct_artist, genre_hint=None, count=3):
         """
-        Generate fake artist names that sound plausible
+        Generate a related existing artist names that sound plausible
         
         Args:
             correct_artist: The real artist name
             genre_hint: Optional genre to make fakes more believable
-            count: Number of fake names to generate
+            count: Number of related existing artist artists to generate
         
         Returns:
-            List of fake artist names
+            List of related existing artist names
         """
         try:
             genre_text = f" in the {genre_hint} genre" if genre_hint else ""
             
-            prompt = f"""Generate {count} plausible but fake music artist names that could be confused with "{correct_artist}"{genre_text}. 
-Make them sound realistic but ensure they are NOT real artists.
+            prompt = f"""Generate {count} of related existing artist names that could be confused with "{correct_artist}"{genre_text}. 
+Make them sound realistic but ensure they are ARE real artists.
 Return only the names, one per line, without numbering or extra text."""
 
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-5.2",
                 messages=[
-                    {"role": "system", "content": "You are a creative assistant that generates plausible fake artist names for a music quiz game."},
+                    {"role": "system", "content": "You are a creative assistant that generates related artist names for each artist for a music quiz game."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.8,
-                max_tokens=100
+                max_completion_tokens=100
             )
             
             fake_names = response.choices[0].message.content.strip().split('\n')
