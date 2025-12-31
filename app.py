@@ -108,7 +108,22 @@ class Room:
             return 4
     
     def calculate_speed_points(self, sid):
-        """Calculate points based on answer speed ranking among correct answers"""
+        """Calculate points based on ranking and response time
+        
+        Scoring formula:
+        1. Base score from ranking: S × (1 - α × (rank - 1))
+           - S = 100 points (max)
+           - α = 0.10 (10% decay per rank)
+           - Example: 1st=100pts, 2nd=90pts, 3rd=80pts
+        
+        2. Time coefficient: max(1 - β × (delta_t / T), factor_min)
+           - β = 0.12 (12% max penalty)
+           - T = 10 seconds (time window)
+           - factor_min = 0.85 (max 15% time penalty)
+           - delta_t = player_time - fastest_time
+        
+        3. Final score: base_score × time_factor
+        """
         current_answers = self.answers.get(self.question_index, {})
         correct_answer_index = self.current_question['correct_answer']
         
@@ -127,12 +142,32 @@ class Room:
         # Find rank of current player (1-indexed)
         rank = next((i + 1 for i, a in enumerate(correct_answers) if a['sid'] == sid), 1)
         
-        # Calculate points: 100 for 1st, halved for each subsequent rank, minimum 10
-        base_score = 100
-        min_score = 10
-        points = base_score / (2 ** (rank - 1))
+        # STEP 1: Base score from ranking
+        S = 100  # Maximum score
+        alpha = 0.10  # 10% decay per rank
+        score_base = S * (1 - alpha * (rank - 1))
         
-        return max(min_score, round(points))
+        # STEP 2: Time-based coefficient
+        # Get player's response time
+        player_time = next((a['timestamp'] for a in correct_answers if a['sid'] == sid), 0)
+        # Get fastest response time
+        t_min = correct_answers[0]['timestamp'] if correct_answers else 0
+        
+        # Calculate time delta in seconds
+        delta_t = (player_time - t_min).total_seconds()
+        
+        # Time parameters
+        T = 10  # Time window in seconds
+        beta = 0.12  # 12% max penalty over full window
+        factor_min = 0.85  # Minimum factor (max 15% time penalty)
+        
+        # Calculate time factor with floor
+        facteur_temps = max(1 - beta * (delta_t / T), factor_min)
+        
+        # STEP 3: Final score
+        final_score = score_base * facteur_temps
+        
+        return round(final_score)
     
     def generate_question(self, track, fake_artists):
         """Generate a question with correct answer and 3 fake options"""
