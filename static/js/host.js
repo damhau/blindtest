@@ -49,7 +49,7 @@ let selectedPlaylistId = null;
 let spotifyAccessToken = null;
 let questionTimer = null;
 let questionStartTime = null;
-const QUESTION_TIME_LIMIT = 10; // seconds
+const QUESTION_TIME_LIMIT = 15; // seconds
 
 // Update song count display when slider changes
 if (songCountSlider && songCountValue) {
@@ -1355,8 +1355,8 @@ function applySettings(settings) {
 function showNotification(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${type === 'success' ? 'bg-green-500' :
-      type === 'error' ? 'bg-red-500' :
-        'bg-blue-500'
+    type === 'error' ? 'bg-red-500' :
+      'bg-blue-500'
     } text-white font-medium transition-opacity duration-300`;
   toast.textContent = message;
 

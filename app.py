@@ -118,7 +118,7 @@ class Room:
         
         2. Time coefficient: max(1 - β × (delta_t / T), factor_min)
            - β = 0.12 (12% max penalty)
-           - T = 10 seconds (time window)
+           - T = 15 seconds (time window)
            - factor_min = 0.85 (max 15% time penalty)
            - delta_t = player_time - fastest_time
         
@@ -157,7 +157,7 @@ class Room:
         delta_t = (player_time - t_min).total_seconds()
         
         # Time parameters
-        T = 10  # Time window in seconds
+        T = 15  # Time window in seconds
         beta = 0.12  # 12% max penalty over full window
         factor_min = 0.85  # Minimum factor (max 15% time penalty)
         
@@ -771,7 +771,7 @@ def handle_playback_started(data):
     
     # Start timer now that playback has begun
     def question_timeout():
-        socketio.sleep(10)
+        socketio.sleep(15)
         if pin in rooms and rooms[pin].question_index == current_question_index:
             if not rooms[pin].voting_closed:
                 print(f'Question {current_question_index + 1} timeout in room {pin}')
@@ -846,8 +846,8 @@ def handle_standings_displayed(data):
     
     # Wait for participants to be ready with minimum display time
     def wait_for_ready():
-        min_display_time = 7.0  # Minimum 7 seconds display
-        max_wait = 15.0  # Increased from 10 to accommodate min display time
+        min_display_time = 6.0  # Minimum 6 seconds display
+        max_wait = 14.0  # Increased from 10 to accommodate min display time
         wait_interval = 0.1
         waited = 0.0
         participant_count = len(rooms[pin].participants)
