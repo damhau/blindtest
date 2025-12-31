@@ -443,7 +443,7 @@ socket.on('new_question', (data) => {
   // Hide standings modal if showing
   if (standingsModal && !standingsModal.classList.contains('hidden')) {
     standingsModal.classList.add('hidden');
-    
+
     // Reset countdown dots
     const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
     dots.forEach(dot => dot.classList.remove('active'));
