@@ -311,7 +311,7 @@ def my_playlists():
             for playlist in results['items']:
                 if playlist:
                     playlist_name = playlist['name']
-                    print(f"Found playlist: {playlist_name} by {playlist['owner']['display_name']}")
+                    # print(f"Found playlist: {playlist_name} by {playlist['owner']['display_name']}")
                     playlists.append({
                         'id': playlist['id'],
                         'name': playlist_name,
@@ -328,7 +328,7 @@ def my_playlists():
                 break
         
         print(f"Loaded {len(playlists)} playlists for user (including Liked Songs)")
-        print(f"Playlist names: {[p['name'] for p in playlists]}")
+        # print(f"Playlist names: {[p['name'] for p in playlists]}")
         return jsonify({'playlists': playlists})
     
     except Exception as e:
@@ -697,4 +697,4 @@ def handle_end_game(data):
 
 
 if __name__ == '__main__':
-    socketio.run(app, debug=False, host='0.0.0.0', port=8000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=8000)
