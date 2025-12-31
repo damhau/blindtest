@@ -866,13 +866,21 @@ function updateIntermediateScoreboard(scores) {
     const color = colors[index % colors.length];
     const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
 
+    // Format points gained display
+    const pointsGainedHtml = player.points_gained > 0
+      ? `<span class="text-lg font-semibold text-green-600">+${player.points_gained}</span>`
+      : `<span class="text-2xl">💀</span>`;
+
     div.innerHTML = `
       <div class="flex items-center gap-4">
         <span class="text-2xl font-bold text-gray-600 w-8">${index + 1}</span>
         <img src="${avatarUrl}" alt="${player.name}" class="w-12 h-12 rounded-full">
         <span class="text-lg font-semibold text-gray-800">${player.name}</span>
       </div>
-      <span class="text-xl font-bold text-primary">${player.score} pts</span>
+      <div class="flex items-center gap-1">
+        <span class="text-xl font-bold text-primary">${player.score} pts</span>
+        ${pointsGainedHtml}
+      </div>
     `;
 
     intermediateScoresList.appendChild(div);

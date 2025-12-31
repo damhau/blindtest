@@ -48,6 +48,7 @@ class Room:
         self.standings_ready_acks = set()  # Track participants ready for next question
         self.created_at = datetime.now()
         self.colors = ['red', 'blue', 'yellow', 'green']
+        self.question_start_scores = {}  # Track scores at start of each question
 
     def add_participant(self, sid, name):
         self.participants[sid] = {
@@ -727,6 +728,12 @@ def send_question(pin):
     room = rooms[pin]
     question = room.current_question
     
+    # Save current scores at start of question
+    room.question_start_scores = {
+        sid: player['score']
+        for sid, player in room.participants.items()
+    }
+    
     # Send to host with all details
     host_data = {
         'question_number': room.question_index + 1,
@@ -810,10 +817,23 @@ def close_voting_and_show_answer(pin):
     
     print(f'Participants acknowledged: {len(room.correct_answer_acks)}/{participant_count} after {waited:.1f}s')
     
+    # Calculate points gained for each player in this question
+    scores_with_gains = []
+    for player in room.get_scores():
+        sid = player['sid']
+        previous_score = room.question_start_scores.get(sid, 0)
+        points_gained = player['score'] - previous_score
+        scores_with_gains.append({
+            'name': player['name'],
+            'score': player['score'],
+            'sid': player['sid'],
+            'points_gained': points_gained
+        })
+    
     # Always show standings to host (even for last question)
     # This ensures host and participants can see the final results
     socketio.emit('show_intermediate_scores', {
-        'scores': room.get_scores(),
+        'scores': scores_with_gains,
         'is_last_question': (room.question_index + 1) >= len(room.questions)
     }, room=pin, to=room.host_sid)
 
