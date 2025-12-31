@@ -174,7 +174,11 @@
       <div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-lg p-8">
         <!-- Playlist Selector (shown when authenticated) -->
         <div id="playlistSelector" class="hidden">
-          <label class="block text-lg font-semibold text-gray-800 mb-4">Select a Playlist:</label>
+          <div class="flex items-center justify-between mb-4">
+            <label class="text-lg font-semibold text-gray-800">Select a Playlist:</label>
+            <input type="text" id="playlistSearch" placeholder="Search playlists..."
+              class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent w-64">
+          </div>
 
           <!-- Selected Playlist Display -->
           <div id="selectedPlaylistDisplay"

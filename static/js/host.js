@@ -336,6 +336,25 @@ function loadUserPlaylists() {
         playlistGrid.appendChild(card);
       });
 
+      // Setup playlist search filter
+      const searchInput = document.getElementById('playlistSearch');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          const query = e.target.value.toLowerCase().trim();
+          document.querySelectorAll('.playlist-card').forEach(card => {
+            const playlistName = card.dataset.playlistName.toLowerCase();
+            const playlistOwner = card.dataset.playlistOwner.toLowerCase();
+
+            // Show card if query matches name or owner, or if query is empty
+            if (query === '' || playlistName.includes(query) || playlistOwner.includes(query)) {
+              card.style.display = '';
+            } else {
+              card.style.display = 'none';
+            }
+          });
+        });
+      }
+
       // Clear selection button
       const clearBtn = document.getElementById('clearPlaylistBtn');
       if (clearBtn) {
@@ -781,7 +800,7 @@ function displayVotedParticipant(playerName) {
   avatarDiv.className = 'flex flex-col items-center gap-1';
   avatarDiv.setAttribute('data-player', playerName);
   avatarDiv.innerHTML = `
-    <img src="${avatarUrl}" alt="${playerName}" class="w-10 h-10 rounded-full border-2 border-green-500 shadow-md">
+    <img src="${avatarUrl}" alt="${playerName}" class="w-10 h-10 rounded-full shadow-md">
     <span class="text-xs text-gray-600 font-medium max-w-[60px] truncate">${playerName}</span>
   `;
 
