@@ -497,8 +497,8 @@ def handle_start_game(data):
         if refreshed_token:
             room.token_info = refreshed_token
         
-        # Fetch more tracks than needed to randomize from
-        tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=50)
+        # Fetch larger pool (200 tracks) from random offset for better variety
+        tracks, error = spotify_oauth_service.get_playlist_tracks(sp_client, room.playlist_id, limit=200, fetch_pool_size=200)
     elif spotify_service:
         # Fall back to basic service (preview URLs only)
         tracks, error = spotify_service.get_playlist_tracks(room.playlist_id, limit=50)

@@ -110,9 +110,10 @@ class SpotifyOAuthService:
                 return playlist_id
         return playlist_input
     
-    def get_playlist_tracks(self, sp_client, playlist_id, limit=10):
+    def get_playlist_tracks(self, sp_client, playlist_id, limit=10, fetch_pool_size=200):
         """
         Fetch tracks from a Spotify playlist using authenticated client
+        Fetches a larger pool from random offset for better variety
         Returns tuple: (tracks_list, error_message)
         """
         try:
@@ -132,37 +133,85 @@ class SpotifyOAuthService:
             except:
                 market = 'US'
             
-            results = sp_client.playlist_tracks(playlist_id, limit=limit, market=market)
-            tracks = []
+            # Get playlist info to know total tracks
+            try:
+                playlist_info = sp_client.playlist(playlist_id, fields='tracks.total')
+                total_tracks = playlist_info['tracks']['total']
+                print(f"Playlist has {total_tracks} total tracks")
+            except:
+                total_tracks = fetch_pool_size
             
-            for item in results['items']:
-                track = item['track']
-                if not track:
-                    continue
-                
-                artists = track['artists']
-                if not artists:
-                    continue
-                
-                main_artist = artists[0]['name']
-                
-                # With OAuth, we get access to full tracks, not just previews
-                track_data = {
-                    'name': track['name'],
-                    'artist': main_artist,
-                    'uri': track['uri'],  # Spotify URI for playback
-                    'preview_url': track.get('preview_url'),  # May still be None, but we can use Web Playback SDK
-                    'album': track['album']['name'],
-                    'cover_url': track['album']['images'][0]['url'] if track['album']['images'] else None,
-                    'duration': track['duration_ms']
-                }
-                
-                tracks.append(track_data)
+            # Determine fetch strategy based on playlist size
+            if total_tracks <= fetch_pool_size:
+                # Small playlist: fetch all
+                pool_size = total_tracks
+                offset = 0
+                print(f"Fetching all {pool_size} tracks")
+            else:
+                # Large playlist: fetch random chunk
+                import random
+                pool_size = fetch_pool_size
+                max_offset = total_tracks - pool_size
+                offset = random.randint(0, max_offset)
+                print(f"Fetching {pool_size} tracks from offset {offset} (total: {total_tracks})")
             
-            if not tracks:
+            # Fetch tracks in batches with pagination
+            all_tracks = []
+            remaining = pool_size
+            current_offset = offset
+            
+            while remaining > 0:
+                batch_size = min(100, remaining)  # Spotify API max is 100 per request
+                results = sp_client.playlist_tracks(
+                    playlist_id,
+                    limit=batch_size,
+                    offset=current_offset,
+                    market=market
+                )
+                
+                for item in results['items']:
+                    track = item['track']
+                    if not track:
+                        continue
+                    
+                    artists = track['artists']
+                    if not artists:
+                        continue
+                    
+                    main_artist = artists[0]['name']
+                    
+                    # With OAuth, we get access to full tracks, not just previews
+                    track_data = {
+                        'name': track['name'],
+                        'artist': main_artist,
+                        'uri': track['uri'],  # Spotify URI for playback
+                        'preview_url': track.get('preview_url'),  # May still be None, but we can use Web Playback SDK
+                        'album': track['album']['name'],
+                        'cover_url': track['album']['images'][0]['url'] if track['album']['images'] else None,
+                        'duration': track['duration_ms']
+                    }
+                    
+                    all_tracks.append(track_data)
+                
+                # Break if we got fewer items than requested (end of playlist)
+                if len(results['items']) < batch_size:
+                    break
+                
+                remaining -= batch_size
+                current_offset += batch_size
+            
+            if not all_tracks:
                 return [], "No tracks found in this playlist."
             
-            return tracks, None
+            print(f"Fetched {len(all_tracks)} tracks from playlist")
+            
+            # Randomly select from pool if limit specified
+            if limit and len(all_tracks) > limit:
+                import random
+                selected_tracks = random.sample(all_tracks, limit)
+                return selected_tracks, None
+            
+            return all_tracks, None
         
         except Exception as e:
             error_str = str(e)

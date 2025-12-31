@@ -194,11 +194,11 @@ socket.on('show_correct_answer', (data) => {
   const correctIndex = data.correct_answer;
   answerButtons.forEach((btn, index) => {
     if (index === correctIndex) {
-      // Add animated checkmark to correct answer
+      // Add checkmark to correct answer
       btn.innerHTML = `
         <div class="flex items-center justify-center gap-3">
           <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
-          <svg class="w-12 h-12 text-white animate-bounce" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" fill="#10b981" opacity="0.3"/>
             <path d="M9 12l2 2 4-4"/>
           </svg>
@@ -211,7 +211,7 @@ socket.on('show_correct_answer', (data) => {
       btn.innerHTML = `
         <div class="flex items-center justify-center gap-3">
           <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
-          <svg class="w-12 h-12 text-white animate-bounce" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" fill="#ef4444" opacity="0.3"/>
             <path d="M8 8l8 8M16 8l-8 8"/>
           </svg>
