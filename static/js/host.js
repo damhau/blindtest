@@ -558,7 +558,10 @@ socket.on('show_intermediate_scores', (data) => {
 
     standingsModal.classList.remove('hidden');
 
-    // Animate countdown dots
+    // Notify server that standings are displayed
+    socket.emit('standings_displayed', { pin: currentPin });
+
+    // Animate countdown dots (visual feedback only, not timing)
     const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
     dots.forEach((dot, index) => {
       setTimeout(() => {
@@ -566,11 +569,12 @@ socket.on('show_intermediate_scores', (data) => {
       }, index * 1000); // Show one dot per second
     });
   }
+});
 
-  // Auto-advance after 7 seconds
-  setTimeout(() => {
-    socket.emit('next_question', { pin: currentPin });
-  }, 7000);
+// Server triggers advance when all participants are ready
+socket.on('advance_question', () => {
+  console.log('Server triggered advance to next question');
+  socket.emit('next_question', { pin: currentPin });
 });
 
 socket.on('game_ended', (data) => {

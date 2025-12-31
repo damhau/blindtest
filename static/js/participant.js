@@ -8,6 +8,8 @@ const socket = io({
 let currentPin = null;
 let currentName = null;
 let hasAnswered = false;
+let selectedAnswer = null;
+let readyForNextTimer = null;
 
 // DOM Elements
 const joinScreen = document.getElementById('joinScreen');
@@ -111,6 +113,7 @@ answerButtons.forEach(btn => {
     btn.classList.add('selected');
 
     hasAnswered = true;
+    selectedAnswer = answer;
 
     socket.emit('submit_answer', {
       pin: currentPin,
@@ -149,6 +152,13 @@ socket.on('game_started', (data) => {
 
 socket.on('new_question_participant', (data) => {
   hasAnswered = false;
+  selectedAnswer = null;
+
+  // Clear ready timer if still running
+  if (readyForNextTimer) {
+    clearTimeout(readyForNextTimer);
+    readyForNextTimer = null;
+  }
 
   // Reset buttons
   answerButtons.forEach((btn, index) => {
@@ -174,16 +184,41 @@ socket.on('scores_updated', (data) => {
 });
 
 socket.on('show_correct_answer', (data) => {
+  // Clear any existing timer to prevent duplicates
+  if (readyForNextTimer) {
+    clearTimeout(readyForNextTimer);
+    readyForNextTimer = null;
+  }
+
   // Highlight the correct answer button with a checkmark
   const correctIndex = data.correct_answer;
   answerButtons.forEach((btn, index) => {
     if (index === correctIndex) {
-      // Add checkmark to correct answer
+      // Add animated checkmark to correct answer
       btn.innerHTML = `
-        <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
-        <span class="text-3xl ml-2">✓</span>
+        <div class="flex items-center justify-center gap-3">
+          <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
+          <svg class="w-12 h-12 text-white animate-bounce" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" fill="#10b981" opacity="0.3"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
       `;
-      btn.style.border = '4px solid white';
+      btn.style.border = '4px solid #10b981';
+      btn.style.boxShadow = '0 0 20px rgba(16, 185, 129, 0.5)';
+    } else if (hasAnswered && selectedAnswer === index) {
+      // Add red X to wrong answer they selected
+      btn.innerHTML = `
+        <div class="flex items-center justify-center gap-3">
+          <span class="text-5xl font-bold">${['A', 'B', 'C', 'D'][index]}</span>
+          <svg class="w-12 h-12 text-white animate-bounce" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" fill="#ef4444" opacity="0.3"/>
+            <path d="M8 8l8 8M16 8l-8 8"/>
+          </svg>
+        </div>
+      `;
+      btn.style.border = '4px solid #ef4444';
+      btn.style.boxShadow = '0 0 20px rgba(239, 68, 68, 0.5)';
     }
   });
 
@@ -196,6 +231,12 @@ socket.on('show_correct_answer', (data) => {
 
   // Notify server that correct answer has been displayed
   socket.emit('correct_answer_displayed', { pin: currentPin });
+
+  // After 5 seconds, signal ready for next
+  readyForNextTimer = setTimeout(() => {
+    socket.emit('ready_for_next', { pin: currentPin });
+    readyForNextTimer = null;
+  }, 5000);
 });
 
 socket.on('question_timeout', () => {

@@ -45,6 +45,7 @@ class Room:
         self.answers = {}  # question_index -> {sid -> answer}
         self.voting_closed = False  # Track if current question voting is closed
         self.correct_answer_acks = set()  # Track participants who saw the correct answer
+        self.standings_ready_acks = set()  # Track participants ready for next question
         self.created_at = datetime.now()
         self.colors = ['red', 'blue', 'yellow', 'green']
 
@@ -237,9 +238,20 @@ def get_user_profile():
     if not token_info:
         return jsonify({'error': 'Not authenticated'}), 401
     
+    if not spotify_oauth_service:
+        return jsonify({'error': 'Spotify OAuth service not available'}), 500
+    
     try:
-        sp = spotipy.Spotify(auth=token_info['access_token'])
-        user_info = sp.current_user()
+        # Refresh token if needed
+        sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(token_info)
+        if not sp_client:
+            return jsonify({'error': 'Authentication expired'}), 401
+        
+        # Update session with refreshed token
+        if refreshed_token and refreshed_token != token_info:
+            session['spotify_token'] = refreshed_token
+        
+        user_info = sp_client.current_user()
         return jsonify(user_info)
     except Exception as e:
         print(f"Error fetching user profile: {e}")
@@ -623,40 +635,49 @@ def handle_playback_started(data):
     def question_timeout():
         socketio.sleep(10)
         if pin in rooms and rooms[pin].question_index == current_question_index:
-            # Time's up - close voting and notify all players
-            rooms[pin].voting_closed = True
-            rooms[pin].correct_answer_acks = set()  # Reset acknowledgments
-            socketio.emit('question_timeout', {}, room=pin)
-            print(f'Question {current_question_index + 1} timeout in room {pin}')
-            
-            # Show correct answer after timeout
-            socketio.sleep(0.5)  # Small delay before showing answer
-            socketio.emit('show_correct_answer', {
-                'correct_answer': room.current_question['correct_answer'],
-                'correct_artist': room.current_question['correct_artist']
-            }, room=pin)
-            
-            # Wait for all participants to acknowledge (max 3 seconds)
-            participant_count = len(rooms[pin].participants)
-            max_wait = 3.0  # Maximum wait time in seconds
-            wait_interval = 0.1  # Check every 100ms
-            waited = 0.0
-            
-            while waited < max_wait and len(rooms[pin].correct_answer_acks) < participant_count:
-                socketio.sleep(wait_interval)
-                waited += wait_interval
-            
-            print(f'Participants acknowledged: {len(rooms[pin].correct_answer_acks)}/{participant_count} after {waited:.1f}s')
-            
-            # Wait additional 1 second before showing standings
-            socketio.sleep(1.0)
-            
-            # Show intermediate scores to host
-            socketio.emit('show_intermediate_scores', {
-                'scores': rooms[pin].get_scores()
-            }, room=pin, to=room.host_sid)
+            if not rooms[pin].voting_closed:
+                print(f'Question {current_question_index + 1} timeout in room {pin}')
+                socketio.emit('question_timeout', {}, room=pin)
+                close_voting_and_show_answer(pin)
     
     socketio.start_background_task(question_timeout)
+
+
+def close_voting_and_show_answer(pin):
+    """Unified flow when voting closes (timeout or all answered)"""
+    if pin not in rooms:
+        return
+    
+    room = rooms[pin]
+    room.voting_closed = True
+    room.correct_answer_acks = set()
+    
+    print(f'Closing voting for question {room.question_index + 1} in room {pin}')
+    
+    # Show correct answer immediately (no delay)
+    socketio.emit('show_correct_answer', {
+        'correct_answer': room.current_question['correct_answer'],
+        'correct_artist': room.current_question['correct_artist']
+    }, room=pin)
+    
+    # Wait for all participants to acknowledge (max 2 seconds)
+    participant_count = len(room.participants)
+    max_wait = 2.0
+    wait_interval = 0.1
+    waited = 0.0
+    
+    while waited < max_wait and len(room.correct_answer_acks) < participant_count:
+        socketio.sleep(wait_interval)
+        waited += wait_interval
+    
+    print(f'Participants acknowledged: {len(room.correct_answer_acks)}/{participant_count} after {waited:.1f}s')
+    
+    # Always show standings to host (even for last question)
+    # This ensures host and participants can see the final results
+    socketio.emit('show_intermediate_scores', {
+        'scores': room.get_scores(),
+        'is_last_question': (room.question_index + 1) >= len(room.questions)
+    }, room=pin, to=room.host_sid)
 
 
 @socketio.on('correct_answer_displayed')
@@ -667,6 +688,73 @@ def handle_correct_answer_displayed(data):
     if pin in rooms and sid in rooms[pin].participants:
         rooms[pin].correct_answer_acks.add(sid)
         print(f'Participant {rooms[pin].participants[sid]["name"]} acknowledged correct answer in room {pin}')
+
+
+@socketio.on('standings_displayed')
+def handle_standings_displayed(data):
+    pin = data.get('pin')
+    
+    if pin not in rooms:
+        return
+    
+    print(f'Host displayed standings for room {pin}')
+    
+    # Reset ready acknowledgments
+    rooms[pin].standings_ready_acks = set()
+    
+    # Record when standings were displayed
+    import time
+    standings_shown_at = time.time()
+    
+    # Wait for participants to be ready with minimum display time
+    def wait_for_ready():
+        min_display_time = 7.0  # Minimum 7 seconds display
+        max_wait = 15.0  # Increased from 10 to accommodate min display time
+        wait_interval = 0.1
+        waited = 0.0
+        participant_count = len(rooms[pin].participants)
+        
+        # Wait for participants to be ready
+        while waited < max_wait and len(rooms[pin].standings_ready_acks) < participant_count:
+            socketio.sleep(wait_interval)
+            waited += wait_interval
+        
+        # Ensure minimum display time has elapsed
+        elapsed = time.time() - standings_shown_at
+        if elapsed < min_display_time:
+            remaining = min_display_time - elapsed
+            print(f'Enforcing minimum display time, waiting {remaining:.1f}s more')
+            socketio.sleep(remaining)
+        
+        ack_count = len(rooms[pin].standings_ready_acks)
+        total_time = time.time() - standings_shown_at
+        print(f'Ready for next: {ack_count}/{participant_count} after {total_time:.1f}s total display time')
+        
+        # Check if this was the last question
+        is_last_question = (rooms[pin].question_index + 1) >= len(rooms[pin].questions)
+        
+        if is_last_question:
+            # End the game
+            rooms[pin].state = 'ended'
+            socketio.emit('game_ended', {
+                'final_scores': rooms[pin].get_scores()
+            }, room=pin)
+            print(f'Game ended in room {pin}')
+        else:
+            # Auto-advance to next question
+            socketio.emit('advance_question', {}, room=pin, to=rooms[pin].host_sid)
+    
+    socketio.start_background_task(wait_for_ready)
+
+
+@socketio.on('ready_for_next')
+def handle_ready_for_next(data):
+    pin = data.get('pin')
+    sid = request.sid
+    
+    if pin in rooms and sid in rooms[pin].participants:
+        rooms[pin].standings_ready_acks.add(sid)
+        print(f'Participant {rooms[pin].participants[sid]["name"]} ready for next question')
 
 
 @socketio.on('submit_answer')
@@ -720,29 +808,16 @@ def handle_submit_answer(data):
     
     # Check if all participants have answered
     current_answers = room.answers.get(room.question_index, {})
-    if len(current_answers) == len(room.participants):
+    if len(current_answers) == len(room.participants) and not room.voting_closed:
         print(f'All {len(room.participants)} participants have answered question {room.question_index + 1}')
         
-        # Check if this is the last question
-        is_last_question = (room.question_index + 1) >= len(room.questions)
+        # Use same flow as timeout for consistency
+        def all_answered_flow():
+            socketio.sleep(0)  # Yield to allow last answer to be processed
+            if pin in rooms and not rooms[pin].voting_closed:
+                close_voting_and_show_answer(pin)
         
-        if is_last_question:
-            # Last question - end the game directly after showing correct answer
-            # Wait a moment for correct answer to be shown
-            def end_game_after_delay():
-                socketio.sleep(3)  # Wait 3 seconds to show correct answer
-                room.state = 'ended'
-                socketio.emit('game_ended', {
-                    'final_scores': room.get_scores()
-                }, room=pin)
-                print(f'Game ended in room {pin}')
-            
-            socketio.start_background_task(end_game_after_delay)
-        else:
-            # Show intermediate scores to host only
-            socketio.emit('show_intermediate_scores', {
-                'scores': room.get_scores()
-            }, room=pin, to=room.host_sid)
+        socketio.start_background_task(all_answered_flow)
 
 
 @socketio.on('next_question')
@@ -759,14 +834,12 @@ def handle_next_question(data):
         emit('error', {'message': 'Only host can advance questions'})
         return
     
-    # Reveal correct answer
-    socketio.emit('show_correct_answer', {
-        'correct_answer': room.current_question['correct_answer'],
-        'correct_artist': room.current_question['correct_artist']
-    }, room=pin)
+    # Note: correct answer already shown in close_voting_and_show_answer()
+    # No need to show it again here
     
     # Move to next question
     room.question_index += 1
+    room.voting_closed = False  # Reset for next question
     
     if room.question_index >= len(room.questions):
         # Game over

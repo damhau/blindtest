@@ -1,5 +1,53 @@
 # Network Reliability Improvements - Event-Driven Architecture
 
+## ✅ TOKEN REFRESH FIX (COMPLETED)
+
+### Issue Found:
+The `/me` endpoint (user profile) was **NOT** refreshing expired tokens before making Spotify API calls. This caused `401 "access token expired"` errors.
+
+### Root Cause:
+```python
+# OLD CODE (BUGGY):
+@app.route('/me')
+def get_user_profile():
+    token_info = session.get('spotify_token')
+    sp = spotipy.Spotify(auth=token_info['access_token'])  # ❌ No token refresh!
+    user_info = sp.current_user()
+```
+
+### Fix Applied:
+```python
+# NEW CODE (FIXED):
+@app.route('/me')
+def get_user_profile():
+    token_info = session.get('spotify_token')
+    
+    # ✅ Use get_spotify_client which auto-refreshes
+    sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(token_info)
+    
+    # ✅ Update session with new token
+    if refreshed_token and refreshed_token != token_info:
+        session['spotify_token'] = refreshed_token
+    
+    user_info = sp_client.current_user()
+```
+
+### Other Endpoints Checked:
+- ✅ `/spotify_token` - Already refreshes token
+- ✅ `/my_playlists` - Already refreshes token
+- ✅ `start_game` socket handler - Already refreshes token during question generation
+- ✅ All `spotify_oauth_service` methods - Receive pre-refreshed client
+
+### Token Refresh Flow (Now Consistent):
+1. Check if token expired: `sp_oauth.is_token_expired(token_info)`
+2. If expired: `sp_oauth.refresh_access_token(token_info['refresh_token'])`
+3. Update session/room with new token
+4. Use refreshed client for API calls
+
+---
+
+# Network Reliability Improvements - Event-Driven Architecture
+
 ## Current Issues with Fixed Timers
 
 ### Problem Areas:
