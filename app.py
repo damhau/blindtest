@@ -487,19 +487,6 @@ def my_playlists():
         # Get user's playlists with pagination
         playlists = []
         
-        # First, add "Liked Songs" as a special collection
-        try:
-            saved_tracks = sp_client.current_user_saved_tracks(limit=1)
-            if saved_tracks and saved_tracks['total'] > 0:
-                playlists.append({
-                    'id': 'liked-songs',  # Special ID for liked songs
-                    'name': 'Liked Songs',
-                    'tracks': saved_tracks['total'],
-                    'image': 'https://misc.scdn.co/liked-songs/liked-songs-640.png',  # Spotify's liked songs icon
-                    'owner': 'You'
-                })
-        except Exception as e:
-            print(f"Could not fetch liked songs: {e}")
         
         # Then get all playlists
         results = sp_client.current_user_playlists(limit=50)
@@ -605,26 +592,37 @@ def handle_join_room(data):
     
     room = rooms[pin]
     
-    if room.state != 'waiting':
-        emit('error', {'message': 'Game already in progress'})
-        return
+    # Allow joining during game (they'll participate from next question)
+    is_mid_game = room.state == 'playing'
     
     room.add_participant(request.sid, name)
     join_room(pin)
     
-    emit('room_joined', {
+    # Prepare response data
+    response_data = {
         'pin': pin,
         'name': name,
         'participants': list(room.participants.values())
-    })
+    }
+    
+    # If joining mid-game, send current game state
+    if is_mid_game:
+        response_data['mid_game'] = True
+        response_data['current_question'] = room.question_index + 1
+        response_data['total_questions'] = len(room.questions)
+        response_data['current_scores'] = room.get_scores()
+        print(f'Player {name} joined room {pin} mid-game (question {room.question_index + 1}/{len(room.questions)})')
+    else:
+        response_data['mid_game'] = False
+        print(f'Player {name} joined room {pin}')
+    
+    emit('room_joined', response_data)
     
     # Notify host and other participants
     socketio.emit('participant_joined', {
         'participants': list(room.participants.values()),
         'new_participant': {'name': name, 'sid': request.sid}
     }, room=pin, skip_sid=request.sid)
-    
-    print(f'Player {name} joined room {pin}')
 
 
 @socketio.on('start_game')

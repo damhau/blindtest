@@ -2653,6 +2653,11 @@ c.execute('''
 
 - play on spotify compatible device instead of browser
 
+
+## 10. ADD PLAYER AFTER GAME START
+
+- allow player to be added after game is started
+
 ## CONCLUSION
 
 Your blindtest application has a **solid foundation** with good architecture and user experience. The proposed improvements focus on:

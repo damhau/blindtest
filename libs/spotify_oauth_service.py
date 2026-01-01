@@ -25,7 +25,9 @@ class SpotifyOAuthService:
         # user-read-email, user-read-private: Required for SDK authentication
         # user-read-playback-state, user-modify-playback-state: Control playback
         # playlist-read-private, playlist-read-collaborative: Access user playlists
-        self.scope = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative"
+        # user-top-read: Access user's top artists and tracks
+        # user-library-read: Access user's saved tracks
+        self.scope = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative user-top-read user-library-read"
         
         self.sp_oauth = SpotifyOAuth(
             client_id=self.client_id,

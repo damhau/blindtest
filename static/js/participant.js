@@ -170,7 +170,55 @@ socket.on('room_joined', (data) => {
   currentNameDisplay.textContent = data.name;
 
   updateWaitingParticipants(data.participants);
-  showScreen(waitingScreen);
+
+  // Check if joining mid-game
+  if (data.mid_game) {
+    console.log('Joined mid-game, waiting for next question');
+
+    // Show game screen with waiting state
+    showScreen(gameScreen);
+
+    // Update player name in game screen
+    const gamePlayerName = document.getElementById('gamePlayerName');
+    if (gamePlayerName) {
+      gamePlayerName.textContent = currentName;
+    }
+
+    // Update score display
+    updateScoreboard(data.current_scores);
+
+    // Show "waiting for next question" overlay
+    const waitingOverlay = document.createElement('div');
+    waitingOverlay.id = 'midGameWaitingOverlay';
+    waitingOverlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
+    waitingOverlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md text-center">
+        <div class="mb-4">
+          <svg class="w-16 h-16 mx-auto text-primary animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+        </div>
+        <h2 class="text-2xl font-bold text-gray-800 mb-2">Welcome to the Game!</h2>
+        <p class="text-gray-600 mb-4">
+          You joined mid-game at question <span class="font-bold text-primary">${data.current_question}/${data.total_questions}</span>
+        </p>
+        <p class="text-gray-500 text-sm">
+          You'll be able to answer starting from the <span class="font-semibold">next question</span>
+        </p>
+        <div class="mt-6">
+          <div class="inline-flex items-center gap-2 text-gray-400">
+            <div class="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
+            <div class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+            <div class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(waitingOverlay);
+  } else {
+    // Normal join before game starts
+    showScreen(waitingScreen);
+  }
 });
 
 socket.on('question_progress', (data) => {
@@ -218,6 +266,12 @@ socket.on('participant_left', (data) => {
 });
 
 socket.on('game_started', (data) => {
+  // Remove mid-game waiting overlay if present
+  const waitingOverlay = document.getElementById('midGameWaitingOverlay');
+  if (waitingOverlay) {
+    waitingOverlay.remove();
+  }
+
   // Display player name in game screen
   const gamePlayerName = document.getElementById('gamePlayerName');
   if (gamePlayerName) {
@@ -253,6 +307,12 @@ socket.on('game_started', (data) => {
 });
 
 socket.on('new_question_participant', (data) => {
+  // Remove mid-game waiting overlay if present (for next question after joining)
+  const waitingOverlay = document.getElementById('midGameWaitingOverlay');
+  if (waitingOverlay) {
+    waitingOverlay.remove();
+  }
+
   hasAnswered = false;
   selectedAnswer = null;
 
