@@ -239,10 +239,34 @@ async function playSpotifyTrack(trackUri) {
       // Premium required or other restriction
       const errorMessage = errorData?.error?.message || 'Premium account required';
       console.error('Forbidden:', errorMessage);
-      showErrorModal(
-        'Spotify Premium Required',
-        'Full playback requires a Spotify Premium account. You may see limited functionality.'
-      );
+
+      // Show quick notification
+      const notification = document.createElement('div');
+      notification.className = 'fixed top-4 right-4 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in';
+      notification.innerHTML = `
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+          </svg>
+          <span>Premium required - skipping to next song...</span>
+        </div>
+      `;
+      document.body.appendChild(notification);
+
+      // Remove notification after 3 seconds
+      setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transition = 'opacity 0.3s';
+        setTimeout(() => notification.remove(), 300);
+      }, 3000);
+
+      // Skip to next question after 2 seconds
+      setTimeout(() => {
+        if (currentPin) {
+          socket.emit('next_question', { pin: currentPin });
+        }
+      }, 2000);
+
       return false;
     } else if (response.status === 429) {
       // Rate limited
