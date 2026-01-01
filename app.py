@@ -1,6 +1,7 @@
 import os
 import random
 import string
+import time
 from flask import Flask, render_template, request, jsonify, redirect, session
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
@@ -55,6 +56,9 @@ class Room:
         self.series_scores = {}  # sid -> cumulative score across all games
         self.all_questions = []  # All questions for all games
         self.game_questions_map = {}  # game_number -> list of question indices
+        # Host reconnection tracking
+        self.host_disconnected = False
+        self.host_disconnect_time = None
 
     def add_participant(self, sid, name):
         self.participants[sid] = {
@@ -537,25 +541,35 @@ def handle_disconnect():
     print(f'Client disconnected: {request.sid}')
     sid = request.sid
     
-    # Check if disconnected user was a host
-    room_to_delete = None
+    # Check if disconnected user was a host or participant
     for pin, room in rooms.items():
         if room.host_sid == sid:
-            room_to_delete = pin
-            # Notify all participants
-            socketio.emit('room_closed', {'message': 'Host disconnected'}, room=pin)
-            break
-        elif sid in room.participants:
-            room.remove_participant(sid)
-            # Notify host and others about participant leaving
-            socketio.emit('participant_left', {
-                'participants': list(room.participants.values()),
-                'scores': room.get_scores()
+            # Mark host as disconnected instead of deleting room immediately
+            room.host_disconnected = True
+            room.host_disconnect_time = time.time()
+            
+            print(f"Host disconnected from room {pin}, grace period for reconnection")
+            
+            # Notify all participants that host is temporarily disconnected
+            socketio.emit('host_disconnected', {
+                'message': 'Host disconnected. Waiting for reconnection...'
             }, room=pin)
             break
-    
-    if room_to_delete:
-        del rooms[room_to_delete]
+        elif sid in room.participants:
+            # Mark participant as disconnected instead of removing immediately
+            # This allows them to reconnect within a grace period
+            participant = room.participants[sid]
+            participant['disconnected'] = True
+            participant['disconnect_time'] = time.time()
+            
+            print(f"Participant {participant['name']} marked as disconnected, grace period for reconnection")
+            
+            # Notify host and others about participant disconnection
+            socketio.emit('participant_disconnected', {
+                'name': participant['name'],
+                'participants': list(room.participants.values())
+            }, room=pin)
+            break
 
 
 @socketio.on('create_room')
@@ -623,6 +637,121 @@ def handle_join_room(data):
         'participants': list(room.participants.values()),
         'new_participant': {'name': name, 'sid': request.sid}
     }, room=pin, skip_sid=request.sid)
+
+
+@socketio.on('rejoin_room')
+def handle_rejoin(data):
+    """Handle participant/host attempting to rejoin after disconnect"""
+    pin = data.get('pin')
+    name = data.get('name')
+    was_host = data.get('was_host', False)
+    
+    print(f'Rejoin attempt - PIN: {pin}, Name: {name}, Was Host: {was_host}')
+    
+    if pin not in rooms:
+        emit('rejoin_failed', {'message': 'Room no longer exists'})
+        return
+    
+    room = rooms[pin]
+    
+    if was_host:
+        # Host reconnecting with new SID
+        print(f'Host rejoining room {pin} with new SID {request.sid} (old: {room.host_sid})')
+        
+        # Update host SID and clear disconnected flags
+        old_host_sid = room.host_sid
+        room.host_sid = request.sid
+        room.host_disconnected = False
+        room.host_disconnect_time = None
+        
+        # Join the socket room
+        join_room(pin)
+        
+        # Send success with current game state
+        response_data = {
+            'success': True,
+            'state': room.state,
+            'participants': list(room.participants.values())
+        }
+        
+        # If game is in progress, send current question info
+        if room.state == 'playing':
+            response_data['current_question'] = room.current_question
+            response_data['question_number'] = room.question_index + 1
+            response_data['total_questions'] = len(room.questions)
+            response_data['voting_closed'] = room.voting_closed
+            
+            # If voting is closed and all participants have acknowledged, auto-advance
+            if room.voting_closed and len(room.standings_ready_acks) == len(room.participants):
+                response_data['should_advance'] = True
+        
+        emit('rejoin_success', response_data)
+        
+        # Notify participants that host has reconnected
+        socketio.emit('host_reconnected', {
+            'message': 'Host reconnected'
+        }, room=pin, skip_sid=request.sid)
+        
+        print(f'Host successfully rejoined room {pin}')
+        
+    else:
+        # Regular participant rejoining
+        # Find participant by name (they might have a new SID)
+        old_sid = None
+        for sid, participant in room.participants.items():
+            if participant['name'] == name:
+                old_sid = sid
+                break
+        
+        if old_sid:
+            print(f'Participant {name} rejoining room {pin} with new SID {request.sid} (old: {old_sid})')
+            
+            # Preserve the participant's score
+            old_participant_data = room.participants[old_sid]
+            current_score = old_participant_data['score']
+            
+            # Remove old SID entry
+            del room.participants[old_sid]
+            
+            # Add with new SID, preserving score
+            room.participants[request.sid] = {
+                'sid': request.sid,
+                'name': name,
+                'score': current_score,
+                'disconnected': False  # Clear disconnected flag
+            }
+            
+            # Preserve series score if exists
+            if old_sid in room.series_scores:
+                room.series_scores[request.sid] = room.series_scores[old_sid]
+                del room.series_scores[old_sid]
+            
+            # Transfer answers if in middle of question
+            if room.question_index in room.answers and old_sid in room.answers[room.question_index]:
+                room.answers[room.question_index][request.sid] = room.answers[room.question_index][old_sid]
+                del room.answers[room.question_index][old_sid]
+            
+            # Join the socket room
+            join_room(pin)
+            
+            # Send success with preserved score
+            emit('rejoin_success', {
+                'success': True,
+                'current_score': current_score,
+                'state': room.state
+            })
+            
+            # Notify others about the reconnection
+            socketio.emit('participant_reconnected', {
+                'name': name,
+                'participants': list(room.participants.values())
+            }, room=pin, skip_sid=request.sid)
+            
+            print(f'Participant {name} successfully rejoined room {pin} with score {current_score}')
+        else:
+            # Participant not found - treat as new join
+            print(f'Participant {name} not found in room {pin}, treating as new join')
+            emit('rejoin_failed', {'message': 'Participant not found in room. Please join as new player.'})
 
 
 @socketio.on('start_game')
@@ -1151,5 +1280,62 @@ def handle_end_game(data):
     }, room=pin)
 
 
+def cleanup_disconnected_participants():
+    """Background task to remove participants and rooms who haven't reconnected after grace period"""
+    GRACE_PERIOD = 30  # seconds
+    
+    while True:
+        socketio.sleep(5)  # Check every 5 seconds
+        
+        current_time = time.time()
+        rooms_to_check = list(rooms.items())  # Create a copy to avoid dict size change during iteration
+        rooms_to_delete = []
+        
+        for pin, room in rooms_to_check:
+            if pin not in rooms:  # Room might have been deleted
+                continue
+            
+            # Check if host has been disconnected too long
+            if room.host_disconnected and room.host_disconnect_time:
+                if current_time - room.host_disconnect_time > GRACE_PERIOD:
+                    # Host grace period expired, delete room
+                    print(f"Removing room {pin} - host grace period expired")
+                    socketio.emit('room_closed', {
+                        'message': 'Host did not reconnect. Room closed.'
+                    }, room=pin)
+                    rooms_to_delete.append(pin)
+                    continue  # Skip participant cleanup for this room
+            
+            # Check for disconnected participants
+            sids_to_remove = []
+            
+            for sid, participant in list(room.participants.items()):
+                if participant.get('disconnected', False):
+                    disconnect_time = participant.get('disconnect_time', current_time)
+                    
+                    if current_time - disconnect_time > GRACE_PERIOD:
+                        # Grace period expired, remove participant
+                        sids_to_remove.append(sid)
+                        print(f"Removing participant {participant['name']} from room {pin} - grace period expired")
+            
+            # Remove expired participants
+            for sid in sids_to_remove:
+                room.remove_participant(sid)
+                
+                # Notify others
+                socketio.emit('participant_left', {
+                    'participants': list(room.participants.values()),
+                    'scores': room.get_scores()
+                }, room=pin)
+        
+        # Delete rooms with expired host disconnections
+        for pin in rooms_to_delete:
+            if pin in rooms:
+                del rooms[pin]
+
+
 if __name__ == '__main__':
+    # Start background cleanup task
+    socketio.start_background_task(cleanup_disconnected_participants)
+    
     socketio.run(app, debug=True, host='0.0.0.0', port=8000)

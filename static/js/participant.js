@@ -13,6 +13,11 @@ let readyForNextTimer = null;
 let gamesInSeries = 1;
 let currentGameNumber = 1;
 
+// Connection resilience tracking
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+let isReconnecting = false;
+
 // DOM Elements
 const joinScreen = document.getElementById('joinScreen');
 const waitingScreen = document.getElementById('waitingScreen');
@@ -409,7 +414,7 @@ socket.on('question_timeout', () => {
     answerButtons.forEach(btn => btn.disabled = true);
     answerFeedback.classList.remove('hidden');
     answerFeedback.className = 'feedback incorrect';
-    answerFeedback.textContent = '⏱ Time\'s up!';
+    // answerFeedback.textContent = '⏱ Time\'s up!';
   }
 });
 
@@ -505,6 +510,12 @@ function updateWaitingParticipants(participants) {
 }
 
 function updateScoreboard(scores) {
+  // Participant page doesn't have a live scoreboard, only end screen scores
+  if (!scoresList) {
+    console.log('Scoreboard not available on participant view');
+    return;
+  }
+
   scoresList.innerHTML = '';
 
   scores.forEach((player, index) => {
@@ -558,4 +569,144 @@ function displayFinalScores(scores) {
 
     finalScores.appendChild(div);
   });
+}
+
+// Connection resilience handlers
+socket.on('disconnect', (reason) => {
+  console.log('Disconnected:', reason);
+  isReconnecting = true;
+  reconnectAttempts = 0; // Reset on disconnect
+
+  if (reason === 'io server disconnect') {
+    // Server forcibly disconnected, try to reconnect
+    socket.connect();
+  }
+
+  // Show reconnection UI
+  showReconnectingOverlay();
+});
+
+socket.on('connect', () => {
+  console.log('WebSocket connected');
+
+  if (isReconnecting && currentPin && currentName) {
+    console.log('Attempting to rejoin room:', currentPin);
+
+    // Attempt to rejoin room
+    socket.emit('rejoin_room', {
+      pin: currentPin,
+      name: currentName,
+      was_host: false
+    });
+  } else if (!isReconnecting) {
+    // Initial connection, not a reconnect
+    reconnectAttempts = 0;
+  }
+
+  isReconnecting = false;
+});
+
+socket.on('connect_error', (error) => {
+  console.error('Connection error:', error);
+  reconnectAttempts++;
+
+  // Update the overlay with current attempt count
+  updateReconnectingOverlay();
+
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    hideReconnectingOverlay();
+    showConnectionFailedError();
+  }
+});
+
+socket.on('rejoin_success', (data) => {
+  console.log('Successfully rejoined room');
+  hideReconnectingOverlay();
+
+  // Update local state with synced data
+  if (data.current_score !== undefined) {
+    playerScore.textContent = data.current_score;
+  }
+
+  // Show brief success message
+  showNotification('Reconnected successfully!', 'success');
+});
+
+socket.on('rejoin_failed', (data) => {
+  console.error('Failed to rejoin room:', data.message);
+  hideReconnectingOverlay();
+  showConnectionFailedError(data.message);
+});
+
+function showReconnectingOverlay() {
+  // Remove existing overlay if present
+  hideReconnectingOverlay();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'reconnectOverlay';
+  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-lg p-8 text-center max-w-md">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+      <p class="text-lg font-semibold text-gray-800">Connection lost</p>
+      <p class="text-gray-600 mt-2">Attempting to reconnect...</p>
+      <p id="reconnectAttemptCount" class="text-sm text-gray-500 mt-4">Attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS}</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function updateReconnectingOverlay() {
+  const attemptCountElement = document.getElementById('reconnectAttemptCount');
+  if (attemptCountElement) {
+    attemptCountElement.textContent = `Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`;
+  }
+}
+
+function hideReconnectingOverlay() {
+  const overlay = document.getElementById('reconnectOverlay');
+  if (overlay) {
+    overlay.remove();
+  }
+}
+
+function showConnectionFailedError(message = 'Unable to reconnect to the server') {
+  const overlay = document.createElement('div');
+  overlay.id = 'connectionFailedOverlay';
+  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-lg p-8 text-center max-w-md">
+      <div class="text-red-500 text-5xl mb-4">⚠️</div>
+      <p class="text-lg font-semibold text-gray-800 mb-2">Connection Failed</p>
+      <p class="text-gray-600 mb-6">${message}</p>
+      <button onclick="location.reload()" class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark">
+        Refresh Page
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function showNotification(message, type = 'info') {
+  const toast = document.createElement('div');
+  const bgColor = type === 'success' ? 'bg-green-500' :
+    type === 'error' ? 'bg-red-500' :
+      'bg-blue-500';
+
+  toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${bgColor} text-white font-medium transform transition-all`;
+  toast.textContent = message;
+  toast.style.transform = 'translateY(100px)';
+
+  document.body.appendChild(toast);
+
+  // Slide in animation
+  setTimeout(() => {
+    toast.style.transform = 'translateY(0)';
+  }, 10);
+
+  // Auto-remove after 3 seconds
+  setTimeout(() => {
+    toast.style.transform = 'translateY(100px)';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
