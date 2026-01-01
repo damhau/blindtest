@@ -757,6 +757,7 @@ def handle_rejoin(data):
 @socketio.on('start_game')
 def handle_start_game(data):
     import random
+    import re
     
     pin = data.get('pin')
     song_count = data.get('song_count', 10)  # Default to 10 if not provided
@@ -777,6 +778,22 @@ def handle_start_game(data):
     if room.host_sid != request.sid:
         emit('error', {'message': 'Only host can start the game'})
         return
+
+    def emit_prep_progress(label: str, percent: int):
+        try:
+            socketio.emit(
+                'question_progress',
+                {
+                    'label': label,
+                    'percent': int(max(0, min(100, percent))),
+                },
+                room=pin,
+            )
+            socketio.sleep(0)
+        except Exception:
+            pass
+
+    emit_prep_progress('Loading playlist tracks…', 5)
     
     # Use OAuth service if host is authenticated, otherwise fall back to basic service
     if room.token_info and spotify_oauth_service:
@@ -811,6 +828,106 @@ def handle_start_game(data):
     if not tracks:
         emit('error', {'message': 'No tracks found in playlist. Try a different playlist with more songs.'})
         return
+
+    emit_prep_progress('Preparing playlist context…', 15)
+
+    # Keep a pool snapshot for context + playlist-anchored distractors.
+    tracks_pool = list(tracks)
+
+    # Best-effort playlist context (helps decade/mixed playlists).
+    playlist_name = None
+    playlist_description = None
+    try:
+        if room.playlist_id == 'liked-songs':
+            playlist_name = 'Liked Songs'
+        elif room.token_info and spotify_oauth_service:
+            # Use authenticated client for private/collaborative playlists
+            sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(room.token_info)
+            if refreshed_token:
+                room.token_info = refreshed_token
+            if sp_client:
+                info = sp_client.playlist(room.playlist_id, fields='name,description')
+                playlist_name = info.get('name')
+                playlist_description = info.get('description')
+        elif spotify_service:
+            info = spotify_service.sp.playlist(room.playlist_id, fields='name,description')
+            playlist_name = info.get('name')
+            playlist_description = info.get('description')
+    except Exception as e:
+        print(f"Could not fetch playlist context: {e}")
+
+    # Locale hint: useful to keep distractors language/scene-consistent.
+    locale_hint = None
+    try:
+        if room.token_info and spotify_oauth_service:
+            sp_client, _ = spotify_oauth_service.get_spotify_client(room.token_info)
+            if sp_client:
+                user_profile = sp_client.current_user()
+                if user_profile:
+                    locale_hint = user_profile.get('country')
+    except Exception:
+        locale_hint = None
+
+    def _norm_name(value: str) -> str:
+        return re.sub(r"\s+", " ", (value or "")).strip().lower()
+
+    def _unique_preserve(values):
+        seen = set()
+        out = []
+        for v in values:
+            nv = _norm_name(v)
+            if not nv or nv in seen:
+                continue
+            seen.add(nv)
+            out.append(v.strip())
+        return out
+
+    playlist_artist_pool = _unique_preserve([t.get('artist', '') for t in tracks_pool if t.get('artist')])
+
+    # Spotify Search validator to reduce LLM hallucinations (real artists only)
+    sp_search = None
+    try:
+        if room.token_info and spotify_oauth_service:
+            sp_search, refreshed_token = spotify_oauth_service.get_spotify_client(room.token_info)
+            if refreshed_token:
+                room.token_info = refreshed_token
+        if not sp_search and spotify_service:
+            sp_search = spotify_service.sp
+    except Exception as e:
+        print(f"Could not initialize Spotify search client: {e}")
+        sp_search = spotify_service.sp if spotify_service else None
+
+    _artist_exists_cache = {}
+
+    def artist_exists_on_spotify(name: str) -> bool:
+        norm = _norm_name(name)
+        if not norm:
+            return False
+        if norm in _artist_exists_cache:
+            return _artist_exists_cache[norm]
+        if not sp_search:
+            # No verifier available; assume true and rely on LLM rules.
+            _artist_exists_cache[norm] = True
+            return True
+
+        try:
+            # Use a strict-ish query; then confirm the top result matches reasonably.
+            res = sp_search.search(q=f'artist:"{name}"', type='artist', limit=1)
+            items = (res or {}).get('artists', {}).get('items', [])
+            if not items:
+                _artist_exists_cache[norm] = False
+                return False
+            top_name = (items[0].get('name') or '').strip()
+            top_norm = _norm_name(top_name)
+            ok = (top_norm == norm) or (norm in top_norm) or (top_norm in norm)
+            _artist_exists_cache[norm] = ok
+            return ok
+        except Exception:
+            # Be permissive on transient API errors
+            _artist_exists_cache[norm] = True
+            return True
+
+    emit_prep_progress('Selecting tracks…', 20)
     
     # Calculate total songs needed for all games
     total_songs_needed = song_count * games_count
@@ -838,43 +955,182 @@ def handle_start_game(data):
         if room.token_info:
             print(f"User is authenticated - allowing game to proceed without preview URLs")
     
-    # Generate ALL questions for ALL games with fake artists
+    # Generate ALL questions for ALL games with distractor artists
     total_tracks = len(tracks)
     print(f"Generating {total_tracks} questions for {games_count} game(s) of {song_count} songs each")
+
+    emit_prep_progress('Generating answer options…', 30)
+
+    # Batch-generate GPT distractors once per start_game to reduce cost.
+    gpt_real_distractors = [[] for _ in range(total_tracks)]  # list[list[str]]
+    gpt_funny_distractors = ["" for _ in range(total_tracks)]
+    funny_enabled = [False for _ in range(total_tracks)]
+    used_real = set()   # normalized
+    used_funny = set()  # normalized
+
+    if openai_service:
+        try:
+            batch_items = [
+                {
+                    'correct_artist': track.get('artist', ''),
+                    'track_name': track.get('name', ''),
+                    'album': track.get('album', '')
+                }
+                for track in tracks
+            ]
+
+            # Include a funny option only sometimes to reduce hinting and keep variety.
+            funny_probability = 0.40
+            funny_enabled = [random.random() < funny_probability for _ in range(total_tracks)]
+            if total_tracks > 0 and not any(funny_enabled):
+                funny_enabled[random.randrange(total_tracks)] = True
+
+            # Provide a representative sample of artists to hint the playlist vibe.
+            artist_sample = playlist_artist_pool[:60]
+
+            gpt_real_distractors = openai_service.generate_real_artist_distractors_batch(
+                batch_items,
+                per_item_count=2,
+                playlist_name=playlist_name,
+                playlist_description=playlist_description,
+                playlist_artists_sample=artist_sample,
+                locale_hint=locale_hint,
+                recent_real=[],
+            )
+
+            funny_items = [batch_items[i] for i in range(total_tracks) if funny_enabled[i]]
+            funny_indices = [i for i in range(total_tracks) if funny_enabled[i]]
+            if funny_items:
+                funny_generated = openai_service.generate_funny_fake_artists_batch(
+                    funny_items,
+                    playlist_name=playlist_name,
+                    playlist_description=playlist_description,
+                    playlist_artists_sample=artist_sample,
+                    locale_hint=locale_hint,
+                    recent_funny=[],
+                )
+                for local_i, original_i in enumerate(funny_indices):
+                    if local_i < len(funny_generated):
+                        gpt_funny_distractors[original_i] = funny_generated[local_i]
+        except Exception as e:
+            print(f"Batch distractor generation failed, will fallback per-track: {e}")
+
+    emit_prep_progress('Verifying answer options…', 65)
+
+    def pick_valid_real_from_candidates(correct_artist: str, candidates, avoid_norm):
+        correct_norm = _norm_name(correct_artist)
+        for cand in candidates or []:
+            cn = _norm_name(cand)
+            if not cn or cn == correct_norm or cn in avoid_norm:
+                continue
+            if artist_exists_on_spotify(cand):
+                return cand
+        return None
+
+    # One repair round: for tracks where Spotify validation removes too many "real" picks
+    if openai_service:
+        needs_repair = []
+        repair_map = []
+        for i, track in enumerate(tracks):
+            correct = track.get('artist', '')
+            candidates = gpt_real_distractors[i] if i < len(gpt_real_distractors) else []
+            verified = []
+            for cand in candidates:
+                if cand and _norm_name(cand) != _norm_name(correct) and artist_exists_on_spotify(cand):
+                    verified.append(cand)
+            gpt_real_distractors[i] = _unique_preserve(verified)[:2]
+            if len(gpt_real_distractors[i]) < 2:
+                needs_repair.append({
+                    'correct_artist': track.get('artist', ''),
+                    'track_name': track.get('name', ''),
+                    'album': track.get('album', '')
+                })
+                repair_map.append(i)
+
+        if needs_repair:
+            try:
+                artist_sample = playlist_artist_pool[:60]
+                repaired = openai_service.generate_real_artist_distractors_batch(
+                    needs_repair,
+                    per_item_count=4,
+                    playlist_name=playlist_name,
+                    playlist_description=playlist_description,
+                    playlist_artists_sample=artist_sample,
+                    locale_hint=locale_hint,
+                    recent_real=[],
+                    extra_banned=list(used_real),
+                )
+                for local_i, original_i in enumerate(repair_map):
+                    correct = tracks[original_i].get('artist', '')
+                    avoid = {_norm_name(correct)}
+                    # Keep any already-verified picks, then top up from repaired candidates.
+                    picks = list(gpt_real_distractors[original_i])
+                    for cand in (repaired[local_i] if local_i < len(repaired) else []):
+                        if len(picks) >= 2:
+                            break
+                        cn = _norm_name(cand)
+                        if cn in avoid:
+                            continue
+                        if not artist_exists_on_spotify(cand):
+                            continue
+                        if cn not in {_norm_name(x) for x in picks}:
+                            picks.append(cand)
+                    gpt_real_distractors[original_i] = picks[:2]
+            except Exception as e:
+                print(f"Real-distractor repair batch failed: {e}")
+
+    emit_prep_progress('Finalizing questions…', 85)
     
     for idx, track in enumerate(tracks, 1):
-        # Emit progress update to entire room (host AND participants)
-        socketio.emit('question_progress', {
-            'current': idx,
-            'total': total_tracks
-        }, room=pin)
-        
-        # Yield control to allow event to be sent immediately
-        socketio.sleep(0)
-        
-        if openai_service:
-            print(f"Using OpenAI to generate fake artists for track: {track['name']}")
-            fake_artists = openai_service.generate_fake_artists(track['artist'], count=3)
-        else:
-            # Fallback: use similar artists from Spotify
-            if room.token_info and spotify_oauth_service:
-                print(f"Using get_similar_artists to generate fake artists for track: {track['name']}")
-                sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(room.token_info)
-                if refreshed_token:
-                    room.token_info = refreshed_token
-                fake_artists = spotify_oauth_service.get_similar_artists(sp_client, track['artist'], limit=3)
-            elif spotify_service:
-                print(f"Using get_similar_artists to generate fake artists")
-                fake_artists = spotify_service.get_similar_artists(track['artist'], limit=3)
-            else:
-                fake_artists = []
-            
-            if len(fake_artists) < 3:
-                # Ultimate fallback
-                fake_artists += [f"Artist {i}" for i in range(3 - len(fake_artists))]
+        correct_artist = track.get('artist', '')
+        correct_norm = _norm_name(correct_artist)
+
+        # Build 3 distractors: 2 GPT real + 1 GPT funny, with de-dupe and fallbacks.
+        fake_artists = []
+        avoid_norm = set(used_real) | set(used_funny) | {correct_norm}
+
+        # 1-2) Two REAL distractors from GPT batch output (Spotify-verified when possible)
+        real_candidates = gpt_real_distractors[idx - 1] if idx - 1 < len(gpt_real_distractors) else []
+        for cand in real_candidates:
+            if len(fake_artists) >= 2:
+                break
+            cn = _norm_name(cand)
+            if not cand or cn in avoid_norm:
+                continue
+            # Validate against Spotify if available
+            if not artist_exists_on_spotify(cand):
+                continue
+            fake_artists.append(cand)
+            used_real.add(cn)
+            avoid_norm.add(cn)
+
+        # 3) GPT funny
+        gpt_funny = ""
+        if idx - 1 < len(gpt_funny_distractors) and idx - 1 < len(funny_enabled) and funny_enabled[idx - 1]:
+            gpt_funny = (gpt_funny_distractors[idx - 1] or "").strip()
+        gpt_funny_norm = _norm_name(gpt_funny)
+        if gpt_funny and gpt_funny_norm not in avoid_norm:
+            fake_artists.append(gpt_funny)
+            used_funny.add(gpt_funny_norm)
+            avoid_norm.add(gpt_funny_norm)
+
+        # Fill remaining REAL slots with a validated fallback list (playlist pool), or generic placeholders.
+        # Note: we do NOT rely on related-artists endpoints.
+        while len(fake_artists) < 3:
+            # Try playlist pool as last resort (still keeps some playlist coherence)
+            candidate = pick_valid_real_from_candidates(correct_artist, playlist_artist_pool, avoid_norm)
+            if candidate:
+                cn = _norm_name(candidate)
+                fake_artists.insert(min(len(fake_artists), 2), candidate)
+                used_real.add(cn)
+                avoid_norm.add(cn)
+                continue
+            fake_artists.append(f"Artist {len(fake_artists) + 1}")
         
         question = room.generate_question(track, fake_artists)
         room.all_questions.append(question)
+
+    emit_prep_progress('Starting game…', 95)
     
     # Split questions into game-specific pools
     for game_num in range(1, games_count + 1):

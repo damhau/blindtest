@@ -528,19 +528,22 @@ socket.on('connected', (data) => {
 
 socket.on('question_progress', (data) => {
 
-
   const progressBarFill = document.getElementById('progressBarFill');
   const progressText = document.getElementById('progressText');
   const progressTotalSongs = document.getElementById('progressTotalSongs');
 
-
-
   if (progressBarFill && progressText) {
-    const percentage = (data.current / data.total) * 100;
+    const percentage = (typeof data.percent === 'number')
+      ? data.percent
+      : ((data.current / data.total) * 100);
     progressBarFill.style.width = percentage + '%';
-    progressText.textContent = `Preparing track ${data.current} of ${data.total}`;
+    if (data.label) {
+      progressText.textContent = data.label;
+    } else {
+      progressText.textContent = `Preparing track ${data.current} of ${data.total}`;
+    }
     if (progressTotalSongs) {
-      progressTotalSongs.textContent = data.total;
+      progressTotalSongs.textContent = data.total ?? 100;
     }
 
   }
