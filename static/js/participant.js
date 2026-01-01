@@ -249,12 +249,18 @@ socket.on('question_progress', (data) => {
       waitingMessage.classList.add('hidden');
     }
 
-    // Calculate percentage
-    const percentage = (data.current / data.total) * 100;
+    // Calculate percentage (supports both {current,total} and {percent})
+    const percentage = (typeof data.percent === 'number')
+      ? data.percent
+      : ((data.current / data.total) * 100);
     progressBar.style.width = percentage + '%';
 
     // Update text
-    progressText.textContent = `Preparing track ${data.current} of ${data.total}...`;
+    if (data.label) {
+      progressText.textContent = data.label;
+    } else {
+      progressText.textContent = `Preparing track ${data.current} of ${data.total}...`;
+    }
 
     if (progressDetails) {
       progressDetails.textContent = `Building your perfect music quiz! 🎶`;
