@@ -336,6 +336,16 @@
 
     <!-- Game Screen -->
     <div id="gameScreen" class="screen hidden">
+      <!-- Compact PIN/QR Code Display (Top Right Corner) -->
+      <div class="fixed top-20 right-6 z-40 bg-white rounded-lg shadow-lg p-4 border-2 border-indigo-200">
+        <div class="text-center">
+          <p class="text-xs text-gray-600 font-semibold mb-1">Join Game</p>
+          <div class="text-2xl font-bold text-indigo-600 tracking-wider mb-2" id="compactRoomPin">----</div>
+          <div id="compactQrcode" class="inline-block"></div>
+          <p class="text-xs text-gray-500 mt-2">Scan to join</p>
+        </div>
+      </div>
+
       <div class="max-w-4xl mx-auto">
         <!-- Game Header -->
         <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 flex justify-between items-center">

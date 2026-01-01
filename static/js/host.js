@@ -13,6 +13,11 @@ let deviceId = null;
 let gamesInSeries = 1;
 let currentGameNumber = 1;
 
+// Connection resilience tracking
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+let isReconnecting = false;
+
 // DOM Elements
 const loginScreen = document.getElementById('loginScreen');
 const createScreen = document.getElementById('createScreen');
@@ -623,6 +628,27 @@ socket.on('game_started', (data) => {
     } else if (document.getElementById('seriesInfo')) {
       document.getElementById('seriesInfo').innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
     }
+  }
+
+  // Generate compact QR code for game screen
+  const compactQrcodeContainer = document.getElementById('compactQrcode');
+  const compactPinDisplay = document.getElementById('compactRoomPin');
+
+  if (compactQrcodeContainer && currentPin) {
+    compactQrcodeContainer.innerHTML = ''; // Clear any existing QR code
+    const participantUrl = `${window.location.origin}/participant?pin=${currentPin}`;
+    new QRCode(compactQrcodeContainer, {
+      text: participantUrl,
+      width: 80,
+      height: 80,
+      colorDark: '#4f46e5',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.L
+    });
+  }
+
+  if (compactPinDisplay) {
+    compactPinDisplay.textContent = currentPin;
   }
 
   showScreen(gameScreen);
@@ -1691,4 +1717,161 @@ function showNotification(message, type = 'info') {
     toast.classList.add('opacity-0');
     setTimeout(() => toast.remove(), 300);
   }, 3000);
+}
+
+// Connection resilience handlers
+socket.on('disconnect', (reason) => {
+  console.log('Disconnected:', reason);
+  isReconnecting = true;
+  reconnectAttempts = 0; // Reset on disconnect
+
+  if (reason === 'io server disconnect') {
+    // Server forcibly disconnected, try to reconnect
+    socket.connect();
+  }
+
+  // Show reconnection UI
+  showReconnectingOverlay();
+});
+
+socket.on('connect', () => {
+  console.log('WebSocket connected');
+
+  if (isReconnecting && currentPin) {
+    console.log('Attempting to rejoin room as host:', currentPin);
+
+    // Attempt to rejoin room as host
+    socket.emit('rejoin_room', {
+      pin: currentPin,
+      was_host: true
+    });
+  } else if (!isReconnecting) {
+    // Initial connection, not a reconnect
+    reconnectAttempts = 0;
+  }
+
+  isReconnecting = false;
+});
+
+socket.on('connect_error', (error) => {
+  console.error('Connection error:', error);
+  reconnectAttempts++;
+
+  // Update the overlay with current attempt count
+  updateReconnectingOverlay();
+
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    hideReconnectingOverlay();
+    showConnectionFailedError();
+  }
+});
+
+socket.on('rejoin_success', (data) => {
+  console.log('Successfully rejoined room as host', data);
+  hideReconnectingOverlay();
+
+  // Close standings modal if it was open
+  if (standingsModal && !standingsModal.classList.contains('hidden')) {
+    standingsModal.classList.add('hidden');
+    console.log('Closed standings modal after reconnection');
+  }
+
+  // Sync state if game is in progress
+  if (data.state === 'playing' && data.current_question) {
+    // Update UI with current game state
+    currentQuestion = data.current_question;
+    songNumber.textContent = data.question_number;
+    totalSongs.textContent = data.total_questions;
+
+    // Show game screen if not already visible
+    if (gameScreen.classList.contains('hidden')) {
+      waitingScreen.classList.add('hidden');
+      gameScreen.classList.remove('hidden');
+    }
+
+    // If backend indicates we should advance (everyone ready), do it automatically
+    if (data.should_advance) {
+      console.log('Auto-advancing to next question after reconnection');
+      setTimeout(() => {
+        socket.emit('next_question', { pin: currentPin });
+      }, 1000);
+    }
+    // If voting is closed but we haven't advanced yet, show a prompt
+    else if (data.voting_closed) {
+      console.log('Voting closed, host can advance when ready');
+      showNotification('Question finished. Ready to continue?', 'info');
+
+      // Stop any audio/visualization
+      if (spotifyPlayer && deviceId) {
+        spotifyPlayer.pause();
+      } else if (audioPlayer) {
+        audioPlayer.pause();
+      }
+      stopVisualization();
+      stopQuestionTimer();
+    }
+  }
+
+  // Update participants list if provided
+  if (data.participants) {
+    updateParticipantsList(data.participants);
+  }
+
+  // Show brief success message
+  showNotification('Reconnected successfully!', 'success');
+});
+
+socket.on('rejoin_failed', (data) => {
+  console.error('Failed to rejoin room:', data.message);
+  hideReconnectingOverlay();
+  showConnectionFailedError(data.message);
+});
+
+function showReconnectingOverlay() {
+  // Remove existing overlay if present
+  hideReconnectingOverlay();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'reconnectOverlay';
+  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-lg p-8 text-center max-w-md">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+      <p class="text-lg font-semibold text-gray-800">Connection lost</p>
+      <p class="text-gray-600 mt-2">Attempting to reconnect...</p>
+      <p id="reconnectAttemptCount" class="text-sm text-gray-500 mt-4">Attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS}</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function updateReconnectingOverlay() {
+  const attemptCountElement = document.getElementById('reconnectAttemptCount');
+  if (attemptCountElement) {
+    attemptCountElement.textContent = `Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`;
+  }
+}
+
+function hideReconnectingOverlay() {
+  const overlay = document.getElementById('reconnectOverlay');
+  if (overlay) {
+    overlay.remove();
+  }
+}
+
+function showConnectionFailedError(message = 'Unable to reconnect to the server') {
+  const overlay = document.createElement('div');
+  overlay.id = 'connectionFailedOverlay';
+  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-lg p-8 text-center max-w-md">
+      <div class="text-red-500 text-5xl mb-4">⚠️</div>
+      <p class="text-lg font-semibold text-gray-800 mb-2">Connection Failed</p>
+      <p class="text-gray-600 mb-6">${message}</p>
+      <button onclick="location.reload()" class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark">
+        Refresh Page
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
 }
