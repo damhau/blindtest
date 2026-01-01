@@ -7,7 +7,7 @@ This helps verify if the 'streaming' scope is included for Web Playback SDK.
 import os
 import sys
 from dotenv import load_dotenv
-from spotify_oauth_service import SpotifyOAuthService
+from libs.spotify_oauth_service import SpotifyOAuthService
 
 load_dotenv()
 

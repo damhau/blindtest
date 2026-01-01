@@ -7,9 +7,9 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
 import spotipy
-from spotify_service import get_spotify_service
-from spotify_oauth_service import get_spotify_oauth_service
-from openai_service import get_openai_service
+from libs.spotify_service import get_spotify_service
+from libs.spotify_oauth_service import get_spotify_oauth_service
+from libs.openai_service import get_openai_service
 
 load_dotenv()
 
@@ -266,6 +266,9 @@ def callback():
     
     # Store token in session
     session['spotify_token'] = token_info
+    print(f"User authenticated with Spotify, token expires at {token_info.get('expires_at')}")
+    print(f"Access token last 10 chars: {token_info.get('access_token')[-10:]}")
+    print(f"Refresh token last 10 chars: {token_info.get('refresh_token')[-10:]}")
     session['authenticated'] = True
     
     # Redirect back to host page
@@ -351,6 +354,7 @@ def get_spotify_token():
     
     # Refresh token if needed
     if spotify_oauth_service and spotify_oauth_service.sp_oauth.is_token_expired(token_info):
+        print(f"Access token expired, refreshing...")
         token_info = spotify_oauth_service.sp_oauth.refresh_access_token(token_info['refresh_token'])
         session['spotify_token'] = token_info
     

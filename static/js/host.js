@@ -173,9 +173,10 @@ function initializeSpotifyPlayer() {
   });
 }
 
-function playSpotifyTrack(trackUri) {
+async function playSpotifyTrack(trackUri) {
   if (!spotifyPlayer || !deviceId) {
-    console.log('Spotify player not ready');
+    console.error('Spotify player not ready - Player:', !!spotifyPlayer, 'Device ID:', !!deviceId);
+    showErrorModal('Playback Error', 'Spotify player is not ready. Please try refreshing the page.');
     return false;
   }
 
@@ -183,29 +184,87 @@ function playSpotifyTrack(trackUri) {
   console.log('Device ID:', deviceId);
   console.log('Token available:', !!spotifyAccessToken);
 
-  fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-    method: 'PUT',
-    body: JSON.stringify({ uris: [trackUri] }),
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${spotifyAccessToken}`
-    },
-  }).then(response => {
+  try {
+    const response = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ uris: [trackUri] }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${spotifyAccessToken}`
+      },
+    });
+
     if (response.ok) {
       console.log('✓ Spotify API accepted play request:', trackUri);
       // Note: actual playback_started will be emitted by player_state_changed listener
       return true;
+    }
+
+    // Handle error responses
+    const errorData = await response.json().catch(() => null);
+    console.error('Failed to play track:', response.status, response.statusText);
+
+    if (errorData) {
+      console.error('Error details:', errorData);
+    }
+
+    // Handle specific error cases
+    if (response.status === 401) {
+      // Token expired or invalid
+      const errorMessage = errorData?.error?.message || 'Authentication expired';
+      console.error('Authentication error:', errorMessage);
+
+
+      // Optionally try to refresh the token automatically
+      if (isAuthenticated) {
+        console.log('Attempting to fetch new token...');
+        fetchSpotifyToken();
+      }
+
+      return false;
+    } else if (response.status === 404) {
+      // Device not found
+      console.error('Device not found - may need to reconnect player');
+      showErrorModal(
+        'Playback Device Error',
+        'Could not find playback device. Please refresh the page.'
+      );
+      return false;
+    } else if (response.status === 403) {
+      // Premium required or other restriction
+      const errorMessage = errorData?.error?.message || 'Premium account required';
+      console.error('Forbidden:', errorMessage);
+      showErrorModal(
+        'Spotify Premium Required',
+        'Full playback requires a Spotify Premium account. You may see limited functionality.'
+      );
+      return false;
+    } else if (response.status === 429) {
+      // Rate limited
+      console.error('Rate limited by Spotify API');
+      showErrorModal(
+        'Too Many Requests',
+        'Spotify playback is temporarily rate-limited. Please wait a moment and try again.'
+      );
+      return false;
     } else {
-      console.log('Failed to play track:', response.status, response.statusText);
-      response.text().then(text => console.log('Error response:', text));
+      // Other errors
+      const errorMessage = errorData?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+      console.error('Playback error:', errorMessage);
+      showErrorModal(
+        'Playback Error',
+        `Failed to play track: ${errorMessage}`
+      );
       return false;
     }
-  }).catch(err => {
-    console.error('Error playing track:', err);
+  } catch (err) {
+    console.error('Network error playing track:', err);
+    showErrorModal(
+      'Network Error',
+      'Failed to communicate with Spotify. Please check your internet connection.'
+    );
     return false;
-  });
-
-  return true;
+  }
 }
 
 function fetchSpotifyToken() {
@@ -766,7 +825,75 @@ function displayQuestion(data) {
 
   if (data.track_uri && spotifyPlayer && deviceId) {
     console.log('Using Spotify Web Playback SDK for track:', data.track_uri);
-    playSpotifyTrack(data.track_uri);
+
+    // Await playback result and handle failures with retry
+    let retryCount = 0;
+    const maxRetries = 2;
+
+    const attemptPlayback = () => {
+      playSpotifyTrack(data.track_uri).then(success => {
+        if (!success) {
+          retryCount++;
+          console.log(`Playback failed (attempt ${retryCount}/${maxRetries + 1})`);
+
+          if (retryCount <= maxRetries) {
+            // Show retry notification
+            const notification = document.createElement('div');
+            notification.className = 'fixed top-4 right-4 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in';
+            notification.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                <span>Playback failed, retrying... (${retryCount}/${maxRetries})</span>
+              </div>
+            `;
+            document.body.appendChild(notification);
+
+            // Remove notification after 2 seconds
+            setTimeout(() => {
+              notification.style.opacity = '0';
+              notification.style.transition = 'opacity 0.3s';
+              setTimeout(() => notification.remove(), 300);
+            }, 2000);
+
+            // Retry after 2 seconds
+            setTimeout(attemptPlayback, 2000);
+          } else {
+            // Max retries reached - show final error and skip to next
+            const notification = document.createElement('div');
+            notification.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in';
+            notification.innerHTML = `
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+                <span>Playback failed after ${maxRetries + 1} attempts, skipping...</span>
+              </div>
+            `;
+            document.body.appendChild(notification);
+
+            // Remove notification after 4 seconds
+            setTimeout(() => {
+              notification.style.opacity = '0';
+              notification.style.transition = 'opacity 0.3s';
+              setTimeout(() => notification.remove(), 300);
+            }, 4000);
+
+            // Skip to next question after 2 seconds
+            setTimeout(() => {
+              if (currentPin) {
+                socket.emit('next_question', { pin: currentPin });
+              }
+            }, 2000);
+          }
+        }
+      });
+    };
+
+    // Start first attempt
+    attemptPlayback();
+
     audioAvailable = true;
     // Start enhanced simulated visualization with track data
     startVisualizerAnimation(data.track_name);

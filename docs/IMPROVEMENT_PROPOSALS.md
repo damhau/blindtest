@@ -2623,6 +2623,7 @@ c.execute('''
 ''')
 ```
 
+
 ### 8.6 Benefits & Use Cases
 
 **Benefits**:
@@ -2647,6 +2648,10 @@ c.execute('''
 - Export tournament results to PDF/CSV
 
 ---
+
+## 9. SPOTIFY CONNECT
+
+- play on spotify compatible device instead of browser
 
 ## CONCLUSION
 

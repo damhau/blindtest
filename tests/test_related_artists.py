@@ -6,8 +6,8 @@ Test script to debug Spotify related artists API issues
 import os
 import sys
 from dotenv import load_dotenv
-from spotify_oauth_service import get_spotify_oauth_service
-from spotify_service import get_spotify_service
+from libs.spotify_oauth_service import get_spotify_oauth_service
+from libs.spotify_service import get_spotify_service
 
 load_dotenv()
 
