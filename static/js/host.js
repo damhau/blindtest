@@ -686,9 +686,15 @@ socket.on('new_question', (data) => {
   if (standingsModal && !standingsModal.classList.contains('hidden')) {
     standingsModal.classList.add('hidden');
 
-    // Reset countdown dots
-    const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
-    dots.forEach(dot => dot.classList.remove('active'));
+    // Reset and clear countdown timer
+    const countdownTimer = standingsModal.querySelector('#countdownTimer');
+    if (countdownTimer) {
+      const intervalId = countdownTimer.dataset.intervalId;
+      if (intervalId) {
+        clearInterval(parseInt(intervalId));
+      }
+      countdownTimer.textContent = '5';
+    }
   }
 
   currentQuestion = data;
@@ -746,13 +752,25 @@ socket.on('show_intermediate_scores', (data) => {
     // Notify server that standings are displayed
     socket.emit('standings_displayed', { pin: currentPin });
 
-    // Animate countdown dots (visual feedback only, not timing)
-    const dots = standingsModal.querySelectorAll('.countdown-dots .dot');
-    dots.forEach((dot, index) => {
-      setTimeout(() => {
-        dot.classList.add('active');
-      }, index * 1000); // Show one dot per second
-    });
+    // Start countdown timer (5, 4, 3, 2, 1)
+    const countdownTimer = standingsModal.querySelector('#countdownTimer');
+    if (countdownTimer) {
+      let countdown = 5;
+      countdownTimer.textContent = countdown;
+      
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown > 0) {
+          countdownTimer.textContent = countdown;
+        } else {
+          clearInterval(countdownInterval);
+          countdownTimer.textContent = 'EJECT!';
+        }
+      }, 1000); // Update every second
+      
+      // Store interval ID for cleanup
+      countdownTimer.dataset.intervalId = countdownInterval;
+    }
   }
 });
 
