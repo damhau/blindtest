@@ -1782,8 +1782,8 @@ def close_voting_and_show_answer(pin):
             'points_gained': points_gained
         })
     
-    # Sort by points gained in this question (descending)
-    scores_with_gains.sort(key=lambda x: x['points_gained'], reverse=True)
+    # Sort by total score (descending)
+    scores_with_gains.sort(key=lambda x: x['score'], reverse=True)
     
     # Always show standings to host (even for last question)
     # This ensures host and participants can see the final results
