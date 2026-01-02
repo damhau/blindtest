@@ -711,7 +711,7 @@ socket.on('show_correct_answer', (data) => {
 });
 
 socket.on('player_answered', (data) => {
-  displayVotedParticipant(data.player_name);
+  displayVotedParticipant(data.player_name, data.response_time_ms);
 });
 
 socket.on('question_timeout', () => {
@@ -755,7 +755,7 @@ socket.on('show_intermediate_scores', (data) => {
     // Start countdown timer (5, 4, 3, 2, 1)
     const countdownTimer = standingsModal.querySelector('#countdownTimer');
     if (countdownTimer) {
-      let countdown = 5;
+      let countdown = 3;
       countdownTimer.textContent = countdown;
 
       const countdownInterval = setInterval(() => {
@@ -1036,7 +1036,7 @@ function displayQuestion(data) {
   });
 }
 
-function displayVotedParticipant(playerName) {
+function displayVotedParticipant(playerName, responseTimeMs) {
   const votedParticipants = document.getElementById('votedParticipants');
   if (!votedParticipants) return;
 
@@ -1057,12 +1057,19 @@ function displayVotedParticipant(playerName) {
   const color = colors[colorIndex];
   const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(playerName)}&backgroundColor=${color}&fontSize=40`;
 
+  // Format response time
+  let timeDisplay = '';
+  if (responseTimeMs !== null && responseTimeMs !== undefined) {
+    timeDisplay = `<span class="text-xs text-gray-500">${responseTimeMs}ms</span>`;
+  }
+
   const avatarDiv = document.createElement('div');
   avatarDiv.className = 'flex flex-col items-center gap-1';
   avatarDiv.setAttribute('data-player', playerName);
   avatarDiv.innerHTML = `
     <img src="${avatarUrl}" alt="${playerName}" class="w-12 h-12 rounded-full shadow-md">
     <span class="text-sm text-gray-600 font-medium max-w-[70px] truncate">${playerName}</span>
+    ${timeDisplay}
   `;
 
   votedParticipants.appendChild(avatarDiv);

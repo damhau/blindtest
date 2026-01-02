@@ -12,6 +12,7 @@ let selectedAnswer = null;
 let readyForNextTimer = null;
 let gamesInSeries = 1;
 let currentGameNumber = 1;
+let questionStartTime = null; // Track when question started on client
 
 // Connection resilience tracking
 let reconnectAttempts = 0;
@@ -152,9 +153,18 @@ answerButtons.forEach(btn => {
     hasAnswered = true;
     selectedAnswer = answer;
 
+    // Calculate client-side response time
+    const answerTime = Date.now();
+    const clientResponseTimeMs = questionStartTime ? answerTime - questionStartTime : null;
+
+    // Send answer with both client timestamp and response time
+    const clientTimestamp = new Date().toISOString();
+
     socket.emit('submit_answer', {
       pin: currentPin,
-      answer: answer
+      answer: answer,
+      client_timestamp: clientTimestamp,
+      client_response_time_ms: clientResponseTimeMs
     });
   });
 });
@@ -326,6 +336,9 @@ socket.on('new_question_participant', (data) => {
 
   hasAnswered = false;
   selectedAnswer = null;
+
+  // Record when question started for client-side timing
+  questionStartTime = Date.now();
 
   // Clear ready timer if still running
   if (readyForNextTimer) {

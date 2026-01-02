@@ -130,6 +130,7 @@ class Room:
         self.created_at = datetime.now()
         self.colors = ['red', 'blue', 'yellow', 'green']
         self.question_start_scores = {}  # Track scores at start of each question
+        self.question_start_time = None  # Track when current question started
         # Series tracking
         self.games_in_series = 1  # Total number of games to play
         self.current_game_number = 1  # Current game (1-indexed)
@@ -173,13 +174,29 @@ class Room:
             })
         return sorted(series_scores_list, key=lambda x: x['series_score'], reverse=True)
 
-    def record_answer(self, sid, answer):
+    def record_answer(self, sid, answer, client_timestamp=None):
         if self.question_index not in self.answers:
             self.answers[self.question_index] = {}
+        
+        # Use client timestamp if provided (for fairness), otherwise server time
+        if client_timestamp:
+            try:
+                # Parse ISO format timestamp from client and make timezone-naive
+                timestamp = datetime.fromisoformat(client_timestamp.replace('Z', '+00:00'))
+                # Strip timezone info to match server's naive datetime
+                timestamp = timestamp.replace(tzinfo=None)
+            except (ValueError, AttributeError):
+                # Fallback to server time if parsing fails
+                timestamp = datetime.now()
+        else:
+            timestamp = datetime.now()
+        
         # Store answer with timestamp
         self.answers[self.question_index][sid] = {
             'answer': answer,
-            'timestamp': datetime.now()
+            'timestamp': timestamp,
+            'server_received': datetime.now(),  # For debugging/validation
+            'used_client_time': client_timestamp is not None
         }
 
     def check_answer(self, sid, answer):
@@ -1667,6 +1684,9 @@ def send_question(pin):
         for sid, player in room.participants.items()
     }
     
+    # Record question start time
+    room.question_start_time = datetime.now()
+    
     # Send to host with all details
     host_data = {
         'question_number': room.question_index + 1,
@@ -1924,6 +1944,7 @@ def handle_start_next_game(data):
 def handle_submit_answer(data):
     pin = data.get('pin')
     answer = data.get('answer')  # Index of selected option (0-3)
+    client_timestamp = data.get('client_timestamp')  # Client-side timestamp for fairness
     
     if pin not in rooms:
         emit('error', {'message': 'Room not found'})
@@ -1945,8 +1966,8 @@ def handle_submit_answer(data):
         emit('error', {'message': 'You have already answered this question'})
         return
     
-    # Record answer
-    room.record_answer(request.sid, answer)
+    # Record answer with client timestamp for fairness
+    room.record_answer(request.sid, answer, client_timestamp)
     
     # Check if correct
     is_correct = room.check_answer(request.sid, answer)
@@ -1957,9 +1978,27 @@ def handle_submit_answer(data):
         'your_score': room.participants[request.sid]['score']
     })
     
+    # Calculate response time in milliseconds using both client and server times
+    response_time_ms = None
+    if room.question_start_time:
+        # Server-side calculation (includes network latency)
+        server_received = room.answers[room.question_index][request.sid]['server_received']
+        server_response_time_ms = int((server_received - room.question_start_time).total_seconds() * 1000)
+        
+        # Get client-side response time if provided (excludes network latency)
+        client_response_time_ms = data.get('client_response_time_ms')
+        
+        # Use the minimum of both (favors the player by removing network latency)
+        if client_response_time_ms is not None and isinstance(client_response_time_ms, (int, float)) and client_response_time_ms > 0:
+            response_time_ms = min(server_response_time_ms, int(client_response_time_ms))
+        else:
+            # Fallback to server time if client time not available or invalid
+            response_time_ms = server_response_time_ms
+    
     # Notify everyone that this player has answered
     socketio.emit('player_answered', {
-        'player_name': room.participants[request.sid]['name']
+        'player_name': room.participants[request.sid]['name'],
+        'response_time_ms': response_time_ms
     }, room=pin)
     
     # Update scores for everyone
