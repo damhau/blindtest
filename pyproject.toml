@@ -13,4 +13,5 @@ dependencies = [
     "spotipy>=2.23.0",
     "openai>=1.6.1",
     "eventlet>=0.33.3",
+    "musicbrainzngs>=0.7.1",
 ]

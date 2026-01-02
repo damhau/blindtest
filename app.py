@@ -6,12 +6,17 @@ import os
 import random
 import string
 import time
+import re
 from flask import Flask, render_template, request, jsonify, redirect, session
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
-import spotipy
+import musicbrainzngs
+
+
+_MB_ARTIST_POOL = []
+_MB_ARTIST_POOL_LAST_REFRESH = 0.0
 from libs.spotify_service import get_spotify_service
 from libs.spotify_oauth_service import get_spotify_oauth_service
 from libs.openai_service import get_openai_service
@@ -34,6 +39,77 @@ spotify_tokens = {}  # sid -> token_info for authenticated hosts
 spotify_service = get_spotify_service()
 spotify_oauth_service = get_spotify_oauth_service()
 openai_service = get_openai_service()
+
+
+def _mb_norm_name(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "")).strip().lower()
+
+
+def _mb_refresh_artist_pool() -> list:
+    """Fetch a small pool of real artist names from MusicBrainz.
+
+    Best-effort: returns an empty list on failure.
+    """
+
+    if not musicbrainzngs:
+        return []
+
+    # Keep it simple + lightweight: query a few random prefixes and merge results.
+    letters = list("abcdefghijklmnopqrstuvwxyz")
+    prefixes = random.sample(letters, k=3)
+    names = []
+
+    for prefix in prefixes:
+        try:
+            res = musicbrainzngs.search_artists(artist=prefix, limit=60)
+            for artist in (res or {}).get("artist-list", []) or []:
+                name = (artist or {}).get("name")
+                if name:
+                    names.append(str(name).strip())
+        except Exception:
+            continue
+
+    # De-dupe while preserving order; filter out garbage.
+    out = []
+    seen = set()
+    for n in names:
+        nn = _mb_norm_name(n)
+        if not nn or nn in seen:
+            continue
+        if len(n) > 60:
+            continue
+        seen.add(nn)
+        out.append(n)
+
+    random.shuffle(out)
+    return out
+
+
+def _mb_pick_fallback_artist(avoid_norm_list: list) -> str:
+    """Return one artist name from MusicBrainz not in avoid list, else empty string."""
+
+    global _MB_ARTIST_POOL, _MB_ARTIST_POOL_LAST_REFRESH
+
+    if not musicbrainzngs:
+        return ""
+
+    avoid_norm = set(avoid_norm_list or [])
+    now = time.time()
+
+    # Refresh at most once per hour, and only if pool looks depleted.
+    if (not _MB_ARTIST_POOL) or (now - _MB_ARTIST_POOL_LAST_REFRESH > 3600):
+        _MB_ARTIST_POOL = _mb_refresh_artist_pool()
+        _MB_ARTIST_POOL_LAST_REFRESH = now
+
+    # Try a few random picks.
+    for _ in range(50):
+        if not _MB_ARTIST_POOL:
+            break
+        name = random.choice(_MB_ARTIST_POOL)
+        if _mb_norm_name(name) not in avoid_norm:
+            return name
+
+    return ""
 
 
 class Room:
@@ -941,23 +1017,99 @@ def handle_start_game(data):
             _artist_exists_cache[norm] = True
             return True
 
-        try:
-            # Use a strict-ish query; then confirm the top result matches reasonably.
-            _spotify_api_calls += 1
-            res = sp_search.search(q=f'artist:"{name}"', type='artist', limit=1)
-            items = (res or {}).get('artists', {}).get('items', [])
-            if not items:
-                _artist_exists_cache[norm] = False
-                return False
-            top_name = (items[0].get('name') or '').strip()
-            top_norm = _norm_name(top_name)
-            ok = (top_norm == norm) or (norm in top_norm) or (top_norm in norm)
-            _artist_exists_cache[norm] = ok
-            return ok
-        except Exception:
-            # Be permissive on transient API errors
+        # Bounded retries with rate-limit backoff.
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Use a strict-ish query; then confirm the top result matches reasonably.
+                _spotify_api_calls += 1
+                res = sp_search.search(q=f'artist:"{name}"', type='artist', limit=1)
+                items = (res or {}).get('artists', {}).get('items', [])
+                if not items:
+                    _artist_exists_cache[norm] = False
+                    return False
+                top_name = (items[0].get('name') or '').strip()
+                top_norm = _norm_name(top_name)
+                ok = (top_norm == norm) or (norm in top_norm) or (top_norm in norm)
+                _artist_exists_cache[norm] = ok
+                return ok
+            except Exception as e:
+                # Spotipy raises SpotifyException with http_status + headers.
+                status = getattr(e, 'http_status', None) or getattr(e, 'status', None)
+                headers = getattr(e, 'headers', None) or {}
+                retry_after = None
+                try:
+                    ra = None
+                    if isinstance(headers, dict):
+                        ra = headers.get('Retry-After') or headers.get('retry-after')
+                    if ra is not None:
+                        retry_after = float(ra)
+                except Exception:
+                    retry_after = None
+
+                if status == 429 and attempt < max_attempts:
+                    wait_s = retry_after if retry_after is not None else (0.8 * attempt)
+                    # eventlet-friendly sleep (Flask-SocketIO stub wants int seconds)
+                    wait_s_int = int(max(1.0, min(10.0, float(wait_s))))
+                    socketio.sleep(wait_s_int)
+                    continue
+
+                # Be permissive on transient API errors
+                _artist_exists_cache[norm] = True
+                return True
+
+            # Should be unreachable, but keep the type-checker happy.
             _artist_exists_cache[norm] = True
             return True
+
+        # If all attempts were rate-limited, be permissive to avoid blocking the game.
+        _artist_exists_cache[norm] = True
+        return True
+
+
+    def prefetch_artist_existence(names, label: str):
+        """Prefetch Spotify existence checks in parallel (eventlet greenlets).
+
+        This warms `_artist_exists_cache` so subsequent per-track loops mostly do
+        fast cache hits.
+        """
+
+        if not sp_search:
+            return
+
+        try:
+            concurrency = int(os.getenv('SPOTIFY_VALIDATE_CONCURRENCY', '4'))
+        except Exception:
+            concurrency = 6
+        concurrency = max(1, min(12, concurrency))
+
+        # De-dupe by normalized name to avoid duplicate API work.
+        uniq = {}
+        for n in names or []:
+            nn = _norm_name(n)
+            if not nn:
+                continue
+            if nn in _artist_exists_cache:
+                continue
+            if nn not in uniq:
+                uniq[nn] = n
+
+        if concurrency <= 1 or len(uniq) < 10:
+            return
+
+        try:
+            import eventlet
+            pool = eventlet.GreenPool(size=concurrency)
+            todo = list(uniq.values())
+            print(f"⚡ Prefetching Spotify validation for {len(todo)} unique artists ({label}, concurrency={concurrency})…")
+            for n in todo:
+                pool.spawn_n(artist_exists_on_spotify, n)
+            pool.waitall()
+            print(f"✓ Prefetch done ({label}): cache={len(_artist_exists_cache)}, Spotify API calls={_spotify_api_calls}")
+        except Exception as e:
+            print(f"⚠ Prefetch skipped ({label}): {type(e).__name__}: {e}")
+
+    prep_total_started_at = time.time()
 
     emit_prep_progress('Selecting tracks…', 20)
     
@@ -1025,7 +1177,7 @@ def handle_start_game(data):
 
             # Provide a representative sample of artists to hint the playlist vibe.
             artist_sample = playlist_artist_pool[:60]
-            print(f"📤 Requesting 2 real distractors per track from GPT (batch of {total_tracks})...")
+            print(f"📤 Requesting 3 real distractors per track from GPT (batch of {total_tracks})...")
             print(f"   Context: {len(artist_sample)} sample artists, locale={locale_hint or 'none'}")
             
             # Split large batches to avoid API timeouts/token limits
@@ -1042,7 +1194,7 @@ def handle_start_game(data):
                         batch_result = tpool.execute(
                             openai_service.generate_real_artist_distractors_batch,
                             batch_subset,
-                            per_item_count=2,
+                            per_item_count=3,
                             playlist_name=playlist_name,
                             playlist_description=playlist_description,
                             playlist_artists_sample=artist_sample,
@@ -1074,7 +1226,7 @@ def handle_start_game(data):
                     gpt_real_distractors = tpool.execute(
                         openai_service.generate_real_artist_distractors_batch,
                         batch_items,
-                        per_item_count=2,
+                        per_item_count=3,
                         playlist_name=playlist_name,
                         playlist_description=playlist_description,
                         playlist_artists_sample=artist_sample,
@@ -1138,19 +1290,35 @@ def handle_start_game(data):
     emit_prep_progress('Verifying answer options…', 65)
 
     def pick_valid_real_from_candidates(correct_artist: str, candidates, avoid_norm):
+        """Pick a candidate artist name not in the avoid list.
+
+        Note: this is used with `playlist_artist_pool`, which is derived from Spotify
+        playlist tracks, so candidates are already real Spotify artists.
+        """
+
         correct_norm = _norm_name(correct_artist)
         for cand in candidates or []:
             cn = _norm_name(cand)
             if not cn or cn == correct_norm or cn in avoid_norm:
                 continue
-            if artist_exists_on_spotify(cand):
-                return cand
+            return cand
         return None
 
     # One repair round: for tracks where Spotify validation removes too many "real" picks
     print("\n=== ✅ Spotify Validation & Repair Round ===")
     if openai_service:
         print(f"🔍 Validating GPT-generated artists against Spotify API...")
+
+        # Warm cache in parallel to reduce wall time in the per-track loop.
+        try:
+            all_candidates = []
+            for cand_list in (gpt_real_distractors or []):
+                if cand_list:
+                    all_candidates.extend([c for c in cand_list if c])
+            prefetch_artist_existence(all_candidates, label='initial')
+        except Exception:
+            pass
+
         validation_start = time.time()
         validation_start_api_calls = _spotify_api_calls  # Track API calls at validation start
         validation_attempts = 0  # Track how many artists we tried to validate
@@ -1162,14 +1330,19 @@ def handle_start_game(data):
                 socketio.sleep(0)
             correct = track.get('artist', '')
             candidates = gpt_real_distractors[i] if i < len(gpt_real_distractors) else []
+            # If we aren't planning to add a funny option, having 3 real distractors
+            # reduces the need for playlist-based fallbacks (which can feel unrelated).
+            target_real = 3 if (i < len(funny_enabled) and not funny_enabled[i]) else 2
             verified = []
             for cand in candidates:
                 validation_attempts += 1
                 if cand and _norm_name(cand) != _norm_name(correct) and artist_exists_on_spotify(cand):
                     verified.append(cand)
                     validation_passed += 1
-            gpt_real_distractors[i] = _unique_preserve(verified)[:2]
-            if len(gpt_real_distractors[i]) < 2:
+                    if len(verified) >= target_real:
+                        break
+            gpt_real_distractors[i] = _unique_preserve(verified)[:3]
+            if len(gpt_real_distractors[i]) < target_real:
                 needs_repair.append({
                     'correct_artist': track.get('artist', ''),
                     'track_name': track.get('name', ''),
@@ -1189,7 +1362,17 @@ def handle_start_game(data):
             print("⚠ WARNING: No candidates were checked! GPT may have returned empty results.")
         
         if needs_repair:
-            print(f"\n🔧 Repair Round: Requesting 4 candidates per track for {len(needs_repair)} tracks...")
+            # If any track needs 3 real distractors, request a slightly larger pool.
+            try:
+                max_target = 2
+                for ri in repair_map:
+                    if ri < len(funny_enabled) and not funny_enabled[ri]:
+                        max_target = 3
+                        break
+            except Exception:
+                max_target = 2
+            repair_per_item = 6 if max_target >= 3 else 4
+            print(f"\n🔧 Repair Round: Requesting {repair_per_item} candidates per track for {len(needs_repair)} tracks...")
             try:
                 artist_sample = playlist_artist_pool[:60]
                 repair_start = time.time()
@@ -1208,7 +1391,7 @@ def handle_start_game(data):
                             batch_repaired = tpool.execute(
                                 openai_service.generate_real_artist_distractors_batch,
                                 batch_subset,
-                                per_item_count=4,
+                                per_item_count=repair_per_item,
                                 playlist_name=playlist_name,
                                 playlist_description=playlist_description,
                                 playlist_artists_sample=artist_sample,
@@ -1228,7 +1411,7 @@ def handle_start_game(data):
                     repaired = tpool.execute(
                         openai_service.generate_real_artist_distractors_batch,
                         needs_repair,
-                        per_item_count=4,
+                        per_item_count=repair_per_item,
                         playlist_name=playlist_name,
                         playlist_description=playlist_description,
                         playlist_artists_sample=artist_sample,
@@ -1236,14 +1419,25 @@ def handle_start_game(data):
                         recent_real=[],
                         extra_banned=list(used_real),
                     )
+
+                # Prefetch repair candidate validations in parallel.
+                try:
+                    repair_candidates = []
+                    for cand_list in (repaired or []):
+                        if cand_list:
+                            repair_candidates.extend([c for c in cand_list if c])
+                    prefetch_artist_existence(repair_candidates, label='repair')
+                except Exception:
+                    pass
                 
                 for local_i, original_i in enumerate(repair_map):
                     correct = tracks[original_i].get('artist', '')
                     avoid = {_norm_name(correct)}
+                    target_real = 3 if (original_i < len(funny_enabled) and not funny_enabled[original_i]) else 2
                     # Keep any already-verified picks, then top up from repaired candidates.
                     picks = list(gpt_real_distractors[original_i])
                     for cand in (repaired[local_i] if local_i < len(repaired) else []):
-                        if len(picks) >= 2:
+                        if len(picks) >= target_real:
                             break
                         cn = _norm_name(cand)
                         if cn in avoid:
@@ -1252,7 +1446,7 @@ def handle_start_game(data):
                             continue
                         if cn not in {_norm_name(x) for x in picks}:
                             picks.append(cand)
-                    gpt_real_distractors[original_i] = picks[:2]
+                    gpt_real_distractors[original_i] = picks[:3]
                 
                 repair_duration = time.time() - repair_start
                 repaired_count = sum(1 for i in repair_map if len(gpt_real_distractors[i]) >= 2)
@@ -1268,8 +1462,18 @@ def handle_start_game(data):
     emit_prep_progress('Finalizing questions…', 85)
     
     print("\n=== 🎲 Finalizing Questions (Fallback Filling) ===")
+    finalize_started_at = time.time()
+
     fallback_used_playlist = 0
-    fallback_used_generic = 0
+    fallback_used_musicbrainz = 0
+    fallback_used_relaxed_playlist = 0
+    fallback_used_unknown = 0
+
+    tracks_with_any_fallback = 0
+    playlist_scan_steps = 0
+    t_playlist_pick = 0.0
+    t_musicbrainz_pick = 0.0
+    t_relaxed_pick = 0.0
     
     for idx, track in enumerate(tracks, 1):
         # Yield periodically so long preparation doesn't starve other requests.
@@ -1278,57 +1482,143 @@ def handle_start_game(data):
         correct_artist = track.get('artist', '')
         correct_norm = _norm_name(correct_artist)
 
-        # Build 3 distractors: 2 GPT real + 1 GPT funny, with de-dupe and fallbacks.
+        # Build 3 distractors: prefer GPT real picks; add GPT funny when enabled;
+        # only then fall back to playlist/MB/Unknown.
         fake_artists = []
         avoid_norm = set(used_real) | set(used_funny) | {correct_norm}
 
-        # 1-2) Two REAL distractors from GPT batch output (Spotify-verified when possible)
+        want_funny = (idx - 1 < len(funny_enabled)) and bool(funny_enabled[idx - 1])
+
+        # Collect up to 3 validated GPT real candidates (don't commit them globally yet).
         real_candidates = gpt_real_distractors[idx - 1] if idx - 1 < len(gpt_real_distractors) else []
+        real_picks = []
         for cand in real_candidates:
-            if len(fake_artists) >= 2:
+            if len(real_picks) >= 3:
                 break
             cn = _norm_name(cand)
             if not cand or cn in avoid_norm:
                 continue
-            # Validate against Spotify if available
             if not artist_exists_on_spotify(cand):
                 continue
-            fake_artists.append(cand)
-            used_real.add(cn)
+            real_picks.append(cand)
             avoid_norm.add(cn)
 
-        # 3) GPT funny
+        # Funny option (only when enabled).
         gpt_funny = ""
-        if idx - 1 < len(gpt_funny_distractors) and idx - 1 < len(funny_enabled) and funny_enabled[idx - 1]:
+        if want_funny and idx - 1 < len(gpt_funny_distractors):
             gpt_funny = (gpt_funny_distractors[idx - 1] or "").strip()
         gpt_funny_norm = _norm_name(gpt_funny)
-        if gpt_funny and gpt_funny_norm not in avoid_norm:
+
+        # Prefer 2 real + funny when available; otherwise use 3 real.
+        if want_funny and gpt_funny and gpt_funny_norm not in avoid_norm:
+            fake_artists.extend(real_picks[:2])
             fake_artists.append(gpt_funny)
             used_funny.add(gpt_funny_norm)
             avoid_norm.add(gpt_funny_norm)
+        else:
+            fake_artists.extend(real_picks[:3])
 
-        # Fill remaining REAL slots with a validated fallback list (playlist pool), or generic placeholders.
+        # Commit any chosen real picks to the global de-dupe set.
+        for a in fake_artists:
+            na = _norm_name(a)
+            if na and a != gpt_funny:
+                used_real.add(na)
+
+        # Fill remaining REAL slots with a playlist-derived fallback list (playlist pool), or generic placeholders.
         # Note: we do NOT rely on related-artists endpoints.
-        slots_needed = 3 - len(fake_artists)
+        used_fallback_this_track = False
         while len(fake_artists) < 3:
             # Try playlist pool as last resort (still keeps some playlist coherence)
-            candidate = pick_valid_real_from_candidates(correct_artist, playlist_artist_pool, avoid_norm)
+            t0 = time.perf_counter()
+            candidate = None
+            # Inline scan so we can measure how much work we do here.
+            correct_norm_local = correct_norm
+            for cand in playlist_artist_pool or []:
+                playlist_scan_steps += 1
+                cn = _norm_name(cand)
+                if not cn or cn == correct_norm_local or cn in avoid_norm:
+                    continue
+                candidate = cand
+                break
+            t_playlist_pick += (time.perf_counter() - t0)
+
             if candidate:
                 cn = _norm_name(candidate)
                 fake_artists.insert(min(len(fake_artists), 2), candidate)
                 used_real.add(cn)
                 avoid_norm.add(cn)
                 fallback_used_playlist += 1
+                used_fallback_this_track = True
                 continue
-            fake_artists.append(f"Artist {len(fake_artists) + 1}")
-            fallback_used_generic += 1
+
+            # Relax constraints and reuse any other playlist artist.
+            # This avoids getting stuck once the global de-dupe set gets large.
+            relaxed_pool = [a for a in playlist_artist_pool if _norm_name(a) != correct_norm]
+            if relaxed_pool:
+                t0 = time.perf_counter()
+                candidate = random.choice(relaxed_pool)
+                t_relaxed_pick += (time.perf_counter() - t0)
+                cn = _norm_name(candidate)
+                fake_artists.insert(min(len(fake_artists), 2), candidate)
+                used_real.add(cn)
+                avoid_norm.add(cn)
+                fallback_used_relaxed_playlist += 1
+                used_fallback_this_track = True
+                continue
+
+            # Last-resort fallback: pick a real artist name from MusicBrainz.
+            mb_candidate = ""
+            if musicbrainzngs:
+                try:
+                    t0 = time.perf_counter()
+                    mb_candidate = tpool.execute(_mb_pick_fallback_artist, list(avoid_norm))
+                    t_musicbrainz_pick += (time.perf_counter() - t0)
+                except Exception:
+                    mb_candidate = ""
+
+            if mb_candidate:
+                cn = _norm_name(mb_candidate)
+                fake_artists.insert(min(len(fake_artists), 2), mb_candidate)
+                used_real.add(cn)
+                avoid_norm.add(cn)
+                fallback_used_musicbrainz += 1
+                used_fallback_this_track = True
+                continue
+
+            # Absolute last fallback.
+            fake_artists.append("Unknown Artist")
+            fallback_used_unknown += 1
+            used_fallback_this_track = True
+
+        if used_fallback_this_track:
+            tracks_with_any_fallback += 1
+
+        # Progress diagnostics (keep it lightweight)
+        if idx == 1 or idx % 10 == 0 or idx == total_tracks:
+            elapsed = time.time() - finalize_started_at
+            avg_ms = (elapsed / idx) * 1000.0 if idx else 0.0
+            remaining = (elapsed / idx) * (total_tracks - idx) if idx else 0.0
+            print(
+                f"   • Finalizing {idx}/{total_tracks} | {elapsed:.1f}s elapsed, {avg_ms:.0f}ms/track, ~{remaining:.1f}s remaining | "
+                f"fallback slots: playlist={fallback_used_playlist}, mb={fallback_used_musicbrainz}, relaxed={fallback_used_relaxed_playlist}, unknown={fallback_used_unknown} | "
+                f"playlist scan steps={playlist_scan_steps}"
+            )
         
         question = room.generate_question(track, fake_artists)
         room.all_questions.append(question)
 
+    finalize_duration = time.time() - finalize_started_at
     print(f"\n📊 Fallback Statistics:")
+    print(f"   Tracks needing any fallback: {tracks_with_any_fallback}/{total_tracks}")
     print(f"   Playlist pool fallbacks: {fallback_used_playlist} slots")
-    print(f"   Generic placeholders: {fallback_used_generic} slots")
+    print(f"   MusicBrainz fallbacks: {fallback_used_musicbrainz} slots")
+    print(f"   Relaxed playlist fallbacks: {fallback_used_relaxed_playlist} slots")
+    print(f"   Unknown Artist fallbacks: {fallback_used_unknown} slots")
+    print(f"   Playlist scan steps: {playlist_scan_steps}")
+    print(f"   Finalizing duration: {finalize_duration:.1f}s")
+    print(f"     - Playlist pick time: {t_playlist_pick:.2f}s")
+    print(f"     - MusicBrainz pick time: {t_musicbrainz_pick:.2f}s")
+    print(f"     - Relaxed pick time: {t_relaxed_pick:.2f}s")
     print(f"   Total Spotify API calls: {_spotify_api_calls}")
     print(f"\n✅ All {total_tracks} questions generated successfully!")
     print(f"{'='*60}\n")
@@ -1360,6 +1650,9 @@ def handle_start_game(data):
     # Send first question
     send_question(pin)
     
+    prep_total_duration = time.time() - prep_total_started_at
+    per_track = (prep_total_duration / total_tracks) if total_tracks else 0.0
+    print(f"⏱ Total preparation time: {prep_total_duration:.1f}s ({per_track:.2f}s/track)")
     print(f'Game started in room {pin} with {len(room.questions)} questions (OAuth: {room.token_info is not None})')
 
 

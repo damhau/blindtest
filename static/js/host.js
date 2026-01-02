@@ -757,7 +757,7 @@ socket.on('show_intermediate_scores', (data) => {
     if (countdownTimer) {
       let countdown = 5;
       countdownTimer.textContent = countdown;
-      
+
       const countdownInterval = setInterval(() => {
         countdown--;
         if (countdown > 0) {
@@ -767,7 +767,7 @@ socket.on('show_intermediate_scores', (data) => {
           countdownTimer.textContent = 'EJECT!';
         }
       }, 1000); // Update every second
-      
+
       // Store interval ID for cleanup
       countdownTimer.dataset.intervalId = countdownInterval;
     }
