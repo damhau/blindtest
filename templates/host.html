@@ -4,6 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='90' font-size='90'>🎵</text></svg>">
   <title>Host Game - MusicQuiz Blindtest</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -621,8 +623,8 @@
 
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium text-gray-700">Sound Effects</p>
-                <p class="text-sm text-gray-500">Play sounds for actions</p>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Sound Effects</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Play sounds for actions</p>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" id="settingSoundEffects" class="sr-only peer" checked>
@@ -634,8 +636,8 @@
 
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium text-gray-700">Notifications</p>
-                <p class="text-sm text-gray-500">Show game notifications</p>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Notifications</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Show game notifications</p>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" id="settingNotifications" class="sr-only peer" checked>
@@ -647,15 +649,16 @@
           </div>
 
           <!-- Display Settings -->
-          <div class="space-y-4 pt-4 border-t border-gray-200">
-            <h3 class="text-lg font-bold text-gray-800">Display</h3>
+          <div class="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200">Display</h3>
 
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium text-gray-700">Theme</p>
-                <p class="text-sm text-gray-500">Visual appearance</p>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Theme</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Visual appearance</p>
               </div>
-              <select id="settingTheme" class="px-4 py-2 border border-gray-300 rounded-lg">
+              <select id="settingTheme"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-lg">
                 <option value="light" selected>Light</option>
                 <option value="dark">Dark</option>
                 <option value="auto">Auto</option>
@@ -664,11 +667,11 @@
           </div>
 
           <!-- Account Actions -->
-          <div class="space-y-4 pt-4 border-t border-gray-200">
-            <h3 class="text-lg font-bold text-gray-800">Account</h3>
+          <div class="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200">Account</h3>
 
             <button onclick="window.location.href='/logout'"
-              class="w-full px-4 py-3 border border-red-300 rounded-lg hover:bg-red-50 text-left text-red-600">
+              class="w-full px-4 py-3 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-left text-red-600 dark:text-red-400">
               <p class="font-medium">Logout from Spotify</p>
               <p class="text-sm">You'll need to login again</p>
             </button>
@@ -676,8 +679,9 @@
         </div>
 
         <!-- Footer -->
-        <div class="sticky bottom-0 bg-gray-50 px-6 py-4 rounded-b-2xl flex justify-end gap-3">
-          <button onclick="closeSettingsModal()" class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100">
+        <div class="sticky bottom-0 bg-gray-50 dark:bg-gray-900 px-6 py-4 rounded-b-2xl flex justify-end gap-3">
+          <button onclick="closeSettingsModal()"
+            class="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-200">
             Cancel
           </button>
           <button onclick="saveSettings()"
