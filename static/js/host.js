@@ -1,3 +1,15 @@
+// Initialize theme immediately to prevent flash
+(function () {
+  const savedTheme = localStorage.getItem('theme') || 'light';
+  if (savedTheme === 'dark') {
+    document.documentElement.classList.add('dark');
+  } else if (savedTheme === 'auto') {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.classList.add('dark');
+    }
+  }
+})();
+
 // Force secure WebSocket when using HTTPS
 const socket = io({
   transports: ['websocket', 'polling'],
@@ -12,6 +24,11 @@ let spotifyPlayer = null;
 let deviceId = null;
 let gamesInSeries = 1;
 let currentGameNumber = 1;
+
+// Spotify Connect variables
+let useSpotifyConnect = false;
+let selectedConnectDevice = null;
+let availableDevices = [];
 
 // Connection resilience tracking
 let reconnectAttempts = 0;
@@ -101,7 +118,7 @@ if (authStatus) {
   authStatus.style.display = 'none';
 }
 
-// Initialize Spotify Web Playback SDK
+// Initialize Spotify Web Playback SDK (only needed when not using Connect)
 window.onSpotifyWebPlaybackSDKReady = () => {
   console.log('Spotify Web Playback SDK ready');
 
@@ -110,12 +127,21 @@ window.onSpotifyWebPlaybackSDKReady = () => {
     return;
   }
 
-  initializeSpotifyPlayer();
+  // Only initialize if not using Connect
+  if (!useSpotifyConnect) {
+    initializeSpotifyPlayer();
+  }
 };
 
 function initializeSpotifyPlayer() {
   if (!spotifyAccessToken) {
     console.log('Cannot initialize player without access token');
+    return;
+  }
+
+  // Skip SDK initialization if using Connect
+  if (useSpotifyConnect) {
+    console.log('Skipping Web Playback SDK initialization - using Spotify Connect');
     return;
   }
 
@@ -141,6 +167,11 @@ function initializeSpotifyPlayer() {
   });
 
   spotifyPlayer.addListener('playback_error', ({ message }) => {
+    // Suppress errors when using Connect mode
+    if (useSpotifyConnect && selectedConnectDevice) {
+      console.log('SDK playback error suppressed (using Connect):', message);
+      return;
+    }
     console.error('Playback Error:', message);
   });
 
@@ -179,9 +210,18 @@ function initializeSpotifyPlayer() {
 }
 
 async function playSpotifyTrack(trackUri) {
+  // If using Spotify Connect, delegate to Connect function
+  if (useSpotifyConnect && selectedConnectDevice) {
+    return await playTrackOnConnectDevice(trackUri, selectedConnectDevice.id);
+  }
+
+  // Otherwise use Web Playback SDK
   if (!spotifyPlayer || !deviceId) {
-    console.error('Spotify player not ready - Player:', !!spotifyPlayer, 'Device ID:', !!deviceId);
-    showErrorModal('Playback Error', 'Spotify player is not ready. Please try refreshing the page.');
+    // Don't show error if we're about to use Connect mode
+    if (!useSpotifyConnect) {
+      console.error('Spotify player not ready - Player:', !!spotifyPlayer, 'Device ID:', !!deviceId);
+      showErrorModal('Playback Error', 'Spotify player is not ready. Please try refreshing the page or use Connect mode.');
+    }
     return false;
   }
 
@@ -296,6 +336,322 @@ async function playSpotifyTrack(trackUri) {
   }
 }
 
+// ============ Spotify Connect API Functions ============
+
+async function getAvailableDevices() {
+  if (!spotifyAccessToken) {
+    console.error('No Spotify access token available');
+    return [];
+  }
+
+  try {
+    const response = await fetch('https://api.spotify.com/v1/me/player/devices', {
+      headers: { 'Authorization': `Bearer ${spotifyAccessToken}` }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.devices || [];
+    }
+
+    console.error('Failed to fetch devices:', response.status);
+    return [];
+  } catch (err) {
+    console.error('Error fetching devices:', err);
+    return [];
+  }
+}
+
+async function playTrackOnConnectDevice(trackUri, deviceId) {
+  if (!spotifyAccessToken) {
+    console.error('No Spotify access token available');
+    return false;
+  }
+
+  const url = deviceId
+    ? `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`
+    : 'https://api.spotify.com/v1/me/player/play';
+
+  try {
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${spotifyAccessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        uris: [trackUri]
+      })
+    });
+
+    if (response.status === 204 || response.status === 202) {
+      console.log('✓ Track playing on Connect device:', trackUri);
+      // Notify backend that playback started
+      if (currentPin) {
+        socket.emit('playback_started', { pin: currentPin });
+      }
+      return true;
+    }
+
+    if (response.status === 404) {
+      console.error('Device not found or not active');
+      showErrorModal('Device Error', 'The selected device is not available. Please select another device.');
+      return false;
+    }
+
+    console.error('Failed to play on Connect device:', response.status);
+    return false;
+  } catch (err) {
+    console.error('Error playing on Connect device:', err);
+    return false;
+  }
+}
+
+async function pauseConnectPlayback() {
+  if (!spotifyAccessToken) return false;
+
+  try {
+    const response = await fetch('https://api.spotify.com/v1/me/player/pause', {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${spotifyAccessToken}` }
+    });
+    return response.status === 204;
+  } catch (err) {
+    console.error('Error pausing playback:', err);
+    return false;
+  }
+}
+
+async function resumeConnectPlayback() {
+  if (!spotifyAccessToken) return false;
+
+  try {
+    const response = await fetch('https://api.spotify.com/v1/me/player/play', {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${spotifyAccessToken}` }
+    });
+    return response.status === 204;
+  } catch (err) {
+    console.error('Error resuming playback:', err);
+    return false;
+  }
+}
+
+async function skipToNextTrack() {
+  if (!spotifyAccessToken) return false;
+
+  try {
+    const response = await fetch('https://api.spotify.com/v1/me/player/next', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${spotifyAccessToken}` }
+    });
+    return response.status === 204;
+  } catch (err) {
+    console.error('Error skipping track:', err);
+    return false;
+  }
+}
+
+async function transferPlaybackToDevice(deviceId, shouldPlay = true) {
+  if (!spotifyAccessToken) return false;
+
+  try {
+    const response = await fetch('https://api.spotify.com/v1/me/player', {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${spotifyAccessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        device_ids: [deviceId],
+        play: shouldPlay
+      })
+    });
+    return response.status === 204;
+  } catch (err) {
+    console.error('Error transferring playback:', err);
+    return false;
+  }
+}
+
+// ============ Device Modal Functions ============
+
+function openDeviceModal() {
+  const modal = document.getElementById('deviceModal');
+  const loadingState = document.getElementById('deviceLoadingState');
+  const listContainer = document.getElementById('deviceListContainer');
+  const noDevicesState = document.getElementById('noDevicesState');
+
+  modal.classList.remove('hidden');
+  loadingState.classList.remove('hidden');
+  listContainer.classList.add('hidden');
+  noDevicesState.classList.add('hidden');
+
+  loadDeviceList();
+}
+
+function closeDeviceModal() {
+  const modal = document.getElementById('deviceModal');
+  modal.classList.add('hidden');
+}
+
+async function loadDeviceList() {
+  const loadingState = document.getElementById('deviceLoadingState');
+  const listContainer = document.getElementById('deviceListContainer');
+  const noDevicesState = document.getElementById('noDevicesState');
+  const deviceList = document.getElementById('deviceList');
+
+  availableDevices = await getAvailableDevices();
+
+  loadingState.classList.add('hidden');
+
+  if (availableDevices.length === 0) {
+    noDevicesState.classList.remove('hidden');
+    return;
+  }
+
+  // Debug: Log all device information
+  console.log('=== Available Spotify Devices ===');
+  availableDevices.forEach((device, index) => {
+    console.log(`Device ${index + 1}:`, {
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      is_active: device.is_active,
+      is_private_session: device.is_private_session,
+      is_restricted: device.is_restricted,
+      volume_percent: device.volume_percent,
+      supports_volume: device.supports_volume
+    });
+  });
+  console.log('================================');
+
+  listContainer.classList.remove('hidden');
+  deviceList.innerHTML = '';
+
+  availableDevices.forEach(device => {
+    const deviceCard = document.createElement('div');
+    deviceCard.className = 'p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition';
+
+    if (selectedConnectDevice && selectedConnectDevice.id === device.id) {
+      deviceCard.classList.add('bg-green-50', 'border-green-500', 'border-2');
+    } else {
+      deviceCard.classList.add('border-gray-300');
+    }
+
+    const deviceIcon = getDeviceIcon(device.type);
+    const isActive = device.is_active ? '<span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Active</span>' : '';
+
+    deviceCard.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="text-3xl">${deviceIcon}</div>
+        <div class="flex-1">
+          <h4 class="font-semibold text-gray-800 dark:text-gray-200">${device.name}</h4>
+          <p class="text-sm text-gray-600 dark:text-gray-400">${device.type} • ${device.volume_percent}% volume</p>
+        </div>
+        ${isActive}
+      </div>
+    `;
+
+    deviceCard.addEventListener('click', () => {
+      selectDevice(device);
+    });
+
+    deviceList.appendChild(deviceCard);
+  });
+}
+
+function getDeviceIcon(deviceType) {
+  const icons = {
+    'Computer': '💻',
+    'Smartphone': '📱',
+    'Speaker': '🔊',
+    'TV': '📺',
+    'AVR': '📻',
+    'STB': '📦',
+    'AudioDongle': '🎧',
+    'GameConsole': '🎮',
+    'CastVideo': '📺',
+    'CastAudio': '🔊',
+    'Automobile': '🚗',
+    'Unknown': '🎵'
+  };
+  return icons[deviceType] || icons['Unknown'];
+}
+
+function selectDevice(device) {
+  selectedConnectDevice = device;
+  useSpotifyConnect = true;
+
+  // Update UI to show selected device
+  updateConnectButton();
+
+  // Close modal
+  closeDeviceModal();
+
+  // Show success message
+  showNotification(`Connected to ${device.name}`, 'success');
+
+  console.log('Selected device:', device);
+}
+
+function disconnectFromDevice() {
+  selectedConnectDevice = null;
+  useSpotifyConnect = false;
+
+  // Update UI
+  updateConnectButton();
+
+  // Reinitialize Web SDK player if needed
+  if (spotifyAccessToken && window.Spotify && !spotifyPlayer) {
+    initializeSpotifyPlayer();
+  }
+
+  // Show notification
+  showNotification('Switched back to Web Playback SDK', 'info');
+
+  console.log('Disconnected from Connect device, using Web SDK');
+}
+
+function updateConnectButton() {
+  const connectBtn = document.getElementById('connectDeviceBtn');
+  const label = document.getElementById('connectDeviceLabel');
+
+  if (!connectBtn) return;
+
+  if (selectedConnectDevice) {
+    label.innerHTML = `
+      <span>📺 ${selectedConnectDevice.name}</span>
+      <button onclick="event.stopPropagation(); disconnectFromDevice();" 
+        class="ml-2 px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded transition"
+        title="Switch back to Web SDK">
+        × Use Web SDK
+      </button>
+    `;
+    connectBtn.classList.add('bg-green-50', 'border', 'border-green-500');
+  } else {
+    label.textContent = 'Connect Device';
+    connectBtn.classList.remove('bg-green-50', 'border', 'border-green-500');
+  }
+}
+
+function showNotification(message, type = 'info') {
+  const notification = document.createElement('div');
+  const bgColor = type === 'success' ? 'bg-green-500' : 'bg-blue-500';
+
+  notification.className = `fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in`;
+  notification.textContent = message;
+  document.body.appendChild(notification);
+
+  setTimeout(() => {
+    notification.style.opacity = '0';
+    notification.style.transition = 'opacity 0.3s';
+    setTimeout(() => notification.remove(), 300);
+  }, 3000);
+}
+
+// ============ End Spotify Connect Functions ============
+
 function fetchSpotifyToken() {
   fetch('/spotify_token')
     .then(r => r.json())
@@ -331,6 +687,13 @@ window.addEventListener('load', () => {
       if (data.authenticated) {
         loadUserPlaylists();
         fetchSpotifyToken();
+
+        // Show Connect button when authenticated
+        const connectBtn = document.getElementById('connectDeviceBtn');
+        if (connectBtn) {
+          connectBtn.classList.remove('hidden');
+          connectBtn.classList.add('flex');
+        }
       }
     })
     .catch(err => {
@@ -475,6 +838,39 @@ function loadUserPlaylists() {
       manualInput.classList.remove('hidden');
     });
 }
+
+// Device Modal Event Listeners
+const connectDeviceBtn = document.getElementById('connectDeviceBtn');
+const closeDeviceModalBtn = document.getElementById('closeDeviceModal');
+const refreshDevicesBtn = document.getElementById('refreshDevicesBtn');
+const retryDevicesBtn = document.getElementById('retryDevicesBtn');
+
+if (connectDeviceBtn) {
+  connectDeviceBtn.addEventListener('click', openDeviceModal);
+}
+
+if (closeDeviceModalBtn) {
+  closeDeviceModalBtn.addEventListener('click', closeDeviceModal);
+}
+
+if (refreshDevicesBtn) {
+  refreshDevicesBtn.addEventListener('click', loadDeviceList);
+}
+
+if (retryDevicesBtn) {
+  retryDevicesBtn.addEventListener('click', loadDeviceList);
+}
+
+// Close modal when clicking backdrop
+const deviceModal = document.getElementById('deviceModal');
+if (deviceModal) {
+  deviceModal.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-backdrop')) {
+      closeDeviceModal();
+    }
+  });
+}
+
 if (skipLoginBtn) {
   skipLoginBtn.addEventListener('click', () => {
     if (loginScreen) loginScreen.classList.add('hidden');
@@ -512,6 +908,7 @@ startGameBtn.addEventListener('click', () => {
   // Disable button and show progress
   startGameBtn.disabled = true;
   startGameBtn.textContent = 'Generating questions...';
+  startGameBtn.classList.add('hidden');
 
   // Hide song count and games count selectors, show progress
   const songCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#songCountSlider)');
@@ -636,6 +1033,7 @@ socket.on('game_started', (data) => {
 
   startGameBtn.disabled = false;
   startGameBtn.textContent = 'Start Game';
+  startGameBtn.classList.remove('hidden');
 
   totalSongs.textContent = data.total_songs;
 
@@ -728,6 +1126,19 @@ socket.on('show_intermediate_scores', (data) => {
   // Stop the timer immediately
   stopQuestionTimer();
 
+  // Stop music playback
+  if (useSpotifyConnect && selectedConnectDevice) {
+    pauseConnectPlayback();
+  } else if (spotifyPlayer && deviceId && !useSpotifyConnect) {
+    try {
+      spotifyPlayer.pause();
+    } catch (err) {
+      console.log('SDK pause skipped:', err.message);
+    }
+  } else if (audioPlayer) {
+    audioPlayer.pause();
+  }
+
   // Ensure correct answer is processed
   if (currentQuestion && currentQuestion.correct_answer !== undefined) {
     displayCorrectAnswer(currentQuestion.correct_answer);
@@ -788,8 +1199,14 @@ socket.on('game_ended', (data) => {
   }
 
   // Stop music/audio playback
-  if (spotifyPlayer && deviceId) {
-    spotifyPlayer.pause();
+  if (useSpotifyConnect && selectedConnectDevice) {
+    pauseConnectPlayback();
+  } else if (spotifyPlayer && deviceId && !useSpotifyConnect) {
+    try {
+      spotifyPlayer.pause();
+    } catch (err) {
+      console.log('SDK pause skipped:', err.message);
+    }
   } else if (audioPlayer) {
     audioPlayer.pause();
   }
@@ -806,8 +1223,14 @@ socket.on('series_ended', (data) => {
   }
 
   // Stop music/audio playback
-  if (spotifyPlayer && deviceId) {
-    spotifyPlayer.pause();
+  if (useSpotifyConnect && selectedConnectDevice) {
+    pauseConnectPlayback();
+  } else if (spotifyPlayer && deviceId && !useSpotifyConnect) {
+    try {
+      spotifyPlayer.pause();
+    } catch (err) {
+      console.log('SDK pause skipped:', err.message);
+    }
   } else if (audioPlayer) {
     audioPlayer.pause();
   }
@@ -902,7 +1325,12 @@ function displayQuestion(data) {
     const maxRetries = 2;
 
     const attemptPlayback = () => {
-      playSpotifyTrack(data.track_uri).then(success => {
+      // Use Spotify Connect if a device is selected, otherwise use Web Playback SDK
+      const playbackPromise = (useSpotifyConnect && selectedConnectDevice)
+        ? playTrackOnConnectDevice(data.track_uri, selectedConnectDevice.id)
+        : playSpotifyTrack(data.track_uri);
+
+      playbackPromise.then(success => {
         if (!success) {
           retryCount++;
           console.log(`Playback failed (attempt ${retryCount}/${maxRetries + 1})`);
@@ -1361,8 +1789,9 @@ function visualize(canvas, canvasCtx) {
     animationId = requestAnimationFrame(draw);
     analyser.getByteFrequencyData(dataArray);
 
-    // Clear canvas with solid background matching the card
-    canvasCtx.fillStyle = '#ffffff';
+    // Clear canvas with background matching theme
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
 
     const barWidth = (canvas.width / bufferLength) * 2.5;
@@ -1432,8 +1861,9 @@ function simulatedVisualize(canvas, canvasCtx, trackName) {
     beatPhase *= 0.85;
     energy += (targetEnergy - energy) * 0.05;
 
-    // Clear canvas with solid background matching the card
-    canvasCtx.fillStyle = '#ffffff';
+    // Clear canvas with background matching theme
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
 
     const barWidth = canvas.width / bars - 2;
@@ -1489,11 +1919,12 @@ function stopVisualization() {
     cancelAnimationFrame(animationId);
   }
 
-  // Clear canvas with white background
+  // Clear canvas with background matching theme
   const canvas = document.getElementById('audioVisualizer');
   if (canvas) {
     const canvasCtx = canvas.getContext('2d');
-    canvasCtx.fillStyle = '#ffffff';
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
   }
 }
@@ -1600,7 +2031,7 @@ async function loadUserProfile() {
 
     if (response.ok) {
       userProfile = await response.json();
-      updateProfileUI(userProfile);
+      await updateProfileUI(userProfile);
     } else {
       console.log('User not authenticated');
     }
@@ -1609,7 +2040,31 @@ async function loadUserProfile() {
   }
 }
 
-function updateProfileUI(profile) {
+// Cache avatar to avoid repeated API calls for menu
+async function getCachedAvatar(seed, backgroundColor = '667eea') {
+  const cacheKey = `avatar_${seed}_${backgroundColor}`;
+  let cached = sessionStorage.getItem(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  // Fetch and cache the avatar
+  const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=${backgroundColor}&fontSize=40`;
+  try {
+    const response = await fetch(avatarUrl);
+    const svgText = await response.text();
+    // Use URI encoding instead of base64 for SVG (avoids UTF-8 issues)
+    const dataUrl = 'data:image/svg+xml,' + encodeURIComponent(svgText);
+    sessionStorage.setItem(cacheKey, dataUrl);
+    return dataUrl;
+  } catch (error) {
+    console.error('Failed to fetch avatar:', error);
+    return avatarUrl; // Fallback to direct URL
+  }
+}
+
+async function updateProfileUI(profile) {
   // Update avatar images
   const displayName = profile.display_name || 'User';
   const userAvatar = document.getElementById('userAvatar');
@@ -1619,10 +2074,10 @@ function updateProfileUI(profile) {
     if (userAvatar) userAvatar.src = profile.profile_image;
     if (menuAvatar) menuAvatar.src = profile.profile_image;
   } else {
-    // Use DiceBear avatar with initials as fallback
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
-    if (userAvatar) userAvatar.src = avatarUrl;
-    if (menuAvatar) menuAvatar.src = avatarUrl;
+    // Use cached DiceBear avatar for menu (faster loading)
+    const cachedAvatarUrl = await getCachedAvatar(displayName);
+    if (userAvatar) userAvatar.src = cachedAvatarUrl;
+    if (menuAvatar) menuAvatar.src = cachedAvatarUrl;
   }
 
   // Update display name
@@ -1676,16 +2131,19 @@ function openSettingsModal() {
     if (userMenu) userMenu.classList.add('hidden');
 
     // Load current settings into form
-    if (userSettings) {
-      const gameLength = document.getElementById('settingGameLength');
-      const soundEffects = document.getElementById('settingSoundEffects');
-      const notifications = document.getElementById('settingNotifications');
-      const theme = document.getElementById('settingTheme');
+    const gameLength = document.getElementById('settingGameLength');
+    const soundEffects = document.getElementById('settingSoundEffects');
+    const notifications = document.getElementById('settingNotifications');
+    const theme = document.getElementById('settingTheme');
 
+    if (userSettings) {
       if (gameLength) gameLength.value = userSettings.default_game_length || 10;
       if (soundEffects) soundEffects.checked = userSettings.sound_effects !== false;
       if (notifications) notifications.checked = userSettings.notifications !== false;
-      if (theme) theme.value = userSettings.theme || 'light';
+      if (theme) theme.value = userSettings.theme || localStorage.getItem('theme') || 'light';
+    } else {
+      // Load from localStorage if no server settings
+      if (theme) theme.value = localStorage.getItem('theme') || 'light';
     }
   }
 }
@@ -1723,6 +2181,10 @@ async function saveSettings() {
     theme: theme ? theme.value : 'light'
   };
 
+  // Always apply settings immediately (don't wait for server)
+  applySettings(settings);
+  userSettings = settings;
+
   try {
     const response = await fetch('/api/user/settings', {
       method: 'POST',
@@ -1731,25 +2193,40 @@ async function saveSettings() {
     });
 
     if (response.ok) {
-      userSettings = settings;
-      applySettings(settings);
       closeSettingsModal();
-
-      // Show success notification
       showNotification('Settings saved successfully!', 'success');
+    } else {
+      // Settings still applied locally even if server save fails
+      closeSettingsModal();
+      showNotification('Settings saved locally', 'info');
     }
   } catch (error) {
-    console.error('Failed to save settings:', error);
-    showNotification('Failed to save settings', 'error');
+    console.error('Failed to save settings to server:', error);
+    // Settings still applied locally
+    closeSettingsModal();
+    showNotification('Settings saved locally', 'info');
   }
 }
 
 function applySettings(settings) {
   // Apply theme
-  if (settings.theme === 'dark') {
-    document.body.classList.add('dark-mode');
-  } else {
-    document.body.classList.remove('dark-mode');
+  const theme = settings.theme || 'light';
+
+  if (theme === 'dark') {
+    document.documentElement.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+  } else if (theme === 'light') {
+    document.documentElement.classList.remove('dark');
+    localStorage.setItem('theme', 'light');
+  } else if (theme === 'auto') {
+    // Auto mode: follow system preference
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (prefersDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', 'auto');
   }
 
   // Other settings can be applied as needed

@@ -5,9 +5,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Host Game - MusicQuiz Blindtest</title>
+  <link rel="icon" type="image/x-icon" href="/static/assets/favicon.ico">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
+      darkMode: 'class',
       theme: {
         extend: {
           colors: {
@@ -23,6 +25,13 @@
 
     body {
       font-family: 'Poppins', sans-serif;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    /* Dark mode background */
+    .dark body {
+      background-color: #1a1a2e !important;
+      color: #e4e4e7;
     }
 
     .card-hover {
@@ -32,6 +41,11 @@
     .card-hover:hover {
       transform: translateY(-5px);
       box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Dark mode shadows */
+    .dark .card-hover:hover {
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
     }
 
     /* Custom styles for game elements */
@@ -77,6 +91,10 @@
       background: rgba(0, 0, 0, 0.5);
     }
 
+    .dark .modal-backdrop {
+      background: rgba(0, 0, 0, 0.8);
+    }
+
     .modal-content {
       position: relative;
       background: white;
@@ -88,26 +106,40 @@
       overflow-y: auto;
       z-index: 51;
     }
+
+    .dark .modal-content {
+      background: #27293d;
+      color: #e4e4e7;
+    }
   </style>
 </head>
 
 <body class="min-h-screen" style="background-color: #fefdfe;">
   <!-- Top Navigation -->
-  <nav class="bg-white border-b border-gray-200 px-6 py-4">
+  <nav class="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <!-- Left: Logo -->
       <div class="flex items-center gap-3">
         <a href="/" class="flex items-center gap-3">
-          <img src="/static/assets/logo.png" alt="BlindTest Logo" class="h-10">
+          <img src="/static/assets/logo.png" alt="BlindTest Logo" class="h-10 dark:hidden">
+          <img src="/static/assets/logo-dark.png" alt="BlindTest Logo" class="h-10 hidden dark:block">
           <div class="flex items-baseline gap-2">
-            <span class="text-xl font-bold text-gray-800">MusicQuiz</span>
-            <span class="text-sm text-gray-500 font-medium">Blindtest</span>
+            <span class="text-xl font-bold text-gray-800 dark:text-gray-100">MusicQuiz</span>
+            <span class="text-sm text-gray-500 dark:text-gray-400 font-medium">Blindtest</span>
           </div>
         </a>
       </div>
 
       <!-- Right: Actions -->
       <div class="flex items-center gap-4">
+        <button id="connectDeviceBtn"
+          class="hidden items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
+          <svg class="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 24 24">
+            <path
+              d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+          </svg>
+          <span class="font-semibold text-sm" id="connectDeviceLabel">Connect Device</span>
+        </button>
         <button class="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
           <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
             <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
@@ -198,11 +230,11 @@
         <p class="text-gray-600">Choose a playlist to create your music quiz</p>
       </div>
 
-      <div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-lg p-8">
+      <div class="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-8">
         <!-- Playlist Selector (shown when authenticated) -->
         <div id="playlistSelector" class="hidden">
           <div class="flex items-center justify-between mb-4">
-            <label class="text-lg font-semibold text-gray-800">Select a Playlist:</label>
+            <label class="text-lg font-semibold text-gray-800 dark:text-gray-200">Select a Playlist:</label>
             <input type="text" id="playlistSearch" placeholder="Search playlists..."
               class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent w-64">
           </div>
@@ -270,44 +302,44 @@
           </div>
 
           <!-- QR Code -->
-          <div class="bg-white rounded-2xl shadow-lg p-6 text-center flex flex-col justify-center">
-            <p class="text-gray-700 font-semibold mb-4">Or scan QR code to join:</p>
+          <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 text-center flex flex-col justify-center">
+            <p class="text-gray-700 dark:text-gray-300 font-semibold mb-4">Or scan QR code to join:</p>
             <div id="qrcode" class="inline-block mx-auto"></div>
           </div>
         </div>
 
         <!-- Participants List -->
-        <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <h3 class="text-lg font-bold text-gray-800 mb-4">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
+          <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200 mb-4">
             Participants (<span id="participantCount">0</span>)
           </h3>
           <ul id="participants" class="space-y-2"></ul>
-          <div id="noParticipants" class="text-center py-8 text-gray-400">
+          <div id="noParticipants" class="text-center py-8 text-gray-400 dark:text-gray-500">
             Waiting for players to join...
           </div>
         </div>
 
         <!-- Song Count Selector -->
-        <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <label class="block text-lg font-semibold text-gray-800 mb-4">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
+          <label class="block text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">
             Number of songs per game: <span id="songCountValue" class="text-primary">10</span>
           </label>
           <input type="range" id="songCountSlider" min="1" max="30" value="10" step="1"
-            class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
-          <div class="flex justify-between text-sm text-gray-500 mt-2">
+            class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary">
+          <div class="flex justify-between text-sm text-gray-500 dark:text-gray-400 mt-2">
             <span>1 song</span>
             <span>30 songs</span>
           </div>
         </div>
 
         <!-- Games Count Selector -->
-        <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <label class="block text-lg font-semibold text-gray-800 mb-4">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
+          <label class="block text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">
             Number of games: <span id="gamesCountValue" class="text-primary">1</span>
           </label>
           <input type="range" id="gamesCountSlider" min="1" max="5" value="1" step="1"
-            class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
-          <div class="flex justify-between text-sm text-gray-500 mt-2">
+            class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary">
+          <div class="flex justify-between text-sm text-gray-500 dark:text-gray-400 mt-2">
             <span>1 game</span>
             <span>5 games</span>
           </div>
@@ -315,14 +347,14 @@
         </div>
 
         <!-- Progress Indicator -->
-        <div id="generatingProgress" class="bg-white rounded-2xl shadow-lg p-6 mb-6 hidden">
-          <h3 class="text-lg font-bold text-gray-800 mb-4">Generating questions...</h3>
-          <div class="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">
+        <div id="generatingProgress" class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6 hidden">
+          <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-4">Generating questions...</h3>
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 mb-2 overflow-hidden">
             <div id="progressBarFill"
               class="bg-gradient-to-r from-indigo-600 to-purple-600 h-3 rounded-full transition-all duration-300"
               style="width: 0%"></div>
           </div>
-          <p id="progressText" class="text-sm text-gray-600 text-center">
+          <p id="progressText" class="text-sm text-gray-600 dark:text-gray-400 text-center">
 
           </p>
         </div>
@@ -337,40 +369,42 @@
     <!-- Game Screen -->
     <div id="gameScreen" class="screen hidden">
       <!-- Compact PIN/QR Code Display (Top Right Corner) -->
-      <div class="fixed top-20 right-6 z-40 bg-white rounded-lg shadow-lg p-4 border-2 border-indigo-200">
+      <div
+        class="fixed top-20 right-6 z-40 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border-2 border-indigo-200 dark:border-indigo-700">
         <div class="text-center">
-          <p class="text-xs text-gray-600 font-semibold mb-1">Join Game</p>
-          <div class="text-2xl font-bold text-indigo-600 tracking-wider mb-2" id="compactRoomPin">----</div>
+          <p class="text-xs text-gray-600 dark:text-gray-400 font-semibold mb-1">Join Game</p>
+          <div class="text-2xl font-bold text-indigo-600 dark:text-indigo-400 tracking-wider mb-2" id="compactRoomPin">
+            ----</div>
           <div id="compactQrcode" class="inline-block"></div>
-          <p class="text-xs text-gray-500 mt-2">Scan to join</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Scan to join</p>
         </div>
       </div>
 
       <div class="max-w-4xl mx-auto">
         <!-- Game Header -->
-        <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 flex justify-between items-center">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6 flex justify-between items-center">
           <div>
-            <h2 class="text-2xl font-bold text-gray-800">
+            <h2 class="text-2xl font-bold text-gray-800 dark:text-gray-200">
               Song <span id="songNumber">1</span> of <span id="totalSongs">10</span>
             </h2>
           </div>
           <div class="text-right">
-            <span class="text-sm text-gray-600 font-medium">Score Multiplier:</span>
+            <span class="text-sm text-gray-600 dark:text-gray-400 font-medium">Score Multiplier:</span>
             <span id="multiplierValue" class="ml-2 text-6xl font-bold text-primary">1x</span>
           </div>
         </div>
 
         <!-- Question Container -->
-        <div class="bg-white rounded-2xl shadow-lg p-8 mb-6">
-          <h3 class="text-2xl font-bold text-gray-800 mb-6 text-center">Who is the artist?</h3>
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-8 mb-6">
+          <h3 class="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6 text-center">Who is the artist?</h3>
 
           <!-- Timer Progress Bar -->
           <div class="mb-4">
             <div class="flex justify-between items-center mb-2">
-              <span class="text-sm font-semibold text-gray-600">Time Remaining</span>
+              <span class="text-sm font-semibold text-gray-600 dark:text-gray-400">Time Remaining</span>
               <span id="timeRemaining" class="text-sm font-bold text-primary">10s</span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
               <div id="timerProgress"
                 class="bg-gradient-to-r from-green-500 to-emerald-600 h-2 rounded-full transition-all duration-100"
                 style="width: 100%"></div>
@@ -381,7 +415,7 @@
           <audio id="audioPlayer" class="hidden"></audio>
 
           <!-- Audio Visualizer -->
-          <div class="mb-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
+          <div class="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
             <canvas id="audioVisualizer" width="800" height="120" class="w-full rounded"></canvas>
           </div>
 
@@ -423,7 +457,7 @@
           <!-- Voted Participants Display -->
           <div class="mt-4">
             <p class="text-sm text-gray-600 mb-2 font-medium">Players who voted:</p>
-            <div id="votedParticipants" class="flex flex-wrap gap-2"></div>
+            <div id="votedParticipants" class="flex flex-wrap gap-2 min-h-[100px]"></div>
           </div>
         </div>
       </div>
@@ -443,6 +477,62 @@
         <div id="intermediateScoresList" class="space-y-3 mb-6"></div>
         <div class="flex justify-center items-center">
           <div id="countdownTimer" class="text-4xl font-bold text-primary">5</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Spotify Connect Device Modal -->
+    <div id="deviceModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content max-w-2xl">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-2xl font-bold text-gray-800">Spotify Connect Devices</h2>
+          <button id="closeDeviceModal" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div id="deviceLoadingState" class="text-center py-8">
+          <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mb-4"></div>
+          <p class="text-gray-600">Loading available devices...</p>
+        </div>
+
+        <div id="deviceListContainer" class="hidden">
+          <p class="text-gray-600 mb-4">Select a device to play music on:</p>
+          <div id="deviceList" class="space-y-2 mb-6 max-h-96 overflow-y-auto"></div>
+
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div class="flex gap-3">
+              <svg class="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div class="text-sm text-gray-700">
+                <p class="font-semibold mb-1">Don't see your device?</p>
+                <p>Open Spotify on your device and start playing any song, then refresh this list.</p>
+              </div>
+            </div>
+          </div>
+
+          <button id="refreshDevicesBtn"
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition">
+            🔄 Refresh Device List
+          </button>
+        </div>
+
+        <div id="noDevicesState" class="hidden text-center py-8">
+          <svg class="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+          <h3 class="text-lg font-semibold text-gray-800 mb-2">No Active Devices Found</h3>
+          <p class="text-gray-600 mb-6">Open Spotify on a device and start playing music to make it available.</p>
+          <button id="retryDevicesBtn"
+            class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition">
+            Try Again
+          </button>
         </div>
       </div>
     </div>
@@ -496,7 +586,8 @@
     <div class="flex items-center justify-center min-h-screen px-4">
       <div class="fixed inset-0 bg-black bg-opacity-50" onclick="closeSettingsModal()"></div>
 
-      <div class="relative bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div
+        class="relative bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <!-- Header -->
         <div class="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-4 rounded-t-2xl">
           <div class="flex items-center justify-between">
@@ -513,14 +604,15 @@
         <div class="p-6 space-y-6">
           <!-- Game Preferences -->
           <div class="space-y-4">
-            <h3 class="text-lg font-bold text-gray-800">Game Preferences</h3>
+            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200">Game Preferences</h3>
 
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium text-gray-700">Default Game Length</p>
-                <p class="text-sm text-gray-500">Number of questions per game</p>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Default Game Length</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Number of questions per game</p>
               </div>
-              <select id="settingGameLength" class="px-4 py-2 border border-gray-300 rounded-lg">
+              <select id="settingGameLength"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-lg">
                 <option value="5">5 questions</option>
                 <option value="10" selected>10 questions</option>
                 <option value="15">15 questions</option>
@@ -530,8 +622,8 @@
 
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium text-gray-700">Sound Effects</p>
-                <p class="text-sm text-gray-500">Play sounds for actions</p>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Sound Effects</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Play sounds for actions</p>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" id="settingSoundEffects" class="sr-only peer" checked>
@@ -543,8 +635,8 @@
 
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium text-gray-700">Notifications</p>
-                <p class="text-sm text-gray-500">Show game notifications</p>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Notifications</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Show game notifications</p>
               </div>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" id="settingNotifications" class="sr-only peer" checked>
@@ -556,15 +648,16 @@
           </div>
 
           <!-- Display Settings -->
-          <div class="space-y-4 pt-4 border-t border-gray-200">
-            <h3 class="text-lg font-bold text-gray-800">Display</h3>
+          <div class="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200">Display</h3>
 
             <div class="flex items-center justify-between">
               <div>
-                <p class="font-medium text-gray-700">Theme</p>
-                <p class="text-sm text-gray-500">Visual appearance</p>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Theme</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Visual appearance</p>
               </div>
-              <select id="settingTheme" class="px-4 py-2 border border-gray-300 rounded-lg">
+              <select id="settingTheme"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-lg">
                 <option value="light" selected>Light</option>
                 <option value="dark">Dark</option>
                 <option value="auto">Auto</option>
@@ -573,11 +666,11 @@
           </div>
 
           <!-- Account Actions -->
-          <div class="space-y-4 pt-4 border-t border-gray-200">
-            <h3 class="text-lg font-bold text-gray-800">Account</h3>
+          <div class="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-200">Account</h3>
 
             <button onclick="window.location.href='/logout'"
-              class="w-full px-4 py-3 border border-red-300 rounded-lg hover:bg-red-50 text-left text-red-600">
+              class="w-full px-4 py-3 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-left text-red-600 dark:text-red-400">
               <p class="font-medium">Logout from Spotify</p>
               <p class="text-sm">You'll need to login again</p>
             </button>
@@ -585,8 +678,9 @@
         </div>
 
         <!-- Footer -->
-        <div class="sticky bottom-0 bg-gray-50 px-6 py-4 rounded-b-2xl flex justify-end gap-3">
-          <button onclick="closeSettingsModal()" class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100">
+        <div class="sticky bottom-0 bg-gray-50 dark:bg-gray-900 px-6 py-4 rounded-b-2xl flex justify-end gap-3">
+          <button onclick="closeSettingsModal()"
+            class="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-200">
             Cancel
           </button>
           <button onclick="saveSettings()"
