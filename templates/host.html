@@ -120,10 +120,11 @@
       <!-- Left: Logo -->
       <div class="flex items-center gap-3">
         <a href="/" class="flex items-center gap-3">
-          <img src="/static/assets/logo.png" alt="BlindTest Logo" class="h-10">
+          <img src="/static/assets/logo.png" alt="BlindTest Logo" class="h-10 dark:hidden">
+          <img src="/static/assets/logo-dark.png" alt="BlindTest Logo" class="h-10 hidden dark:block">
           <div class="flex items-baseline gap-2">
-            <span class="text-xl font-bold text-gray-800">MusicQuiz</span>
-            <span class="text-sm text-gray-500 font-medium">Blindtest</span>
+            <span class="text-xl font-bold text-gray-800 dark:text-gray-100">MusicQuiz</span>
+            <span class="text-sm text-gray-500 dark:text-gray-400 font-medium">Blindtest</span>
           </div>
         </a>
       </div>
@@ -318,26 +319,26 @@
         </div>
 
         <!-- Song Count Selector -->
-        <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <label class="block text-lg font-semibold text-gray-800 mb-4">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
+          <label class="block text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">
             Number of songs per game: <span id="songCountValue" class="text-primary">10</span>
           </label>
           <input type="range" id="songCountSlider" min="1" max="30" value="10" step="1"
-            class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
-          <div class="flex justify-between text-sm text-gray-500 mt-2">
+            class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary">
+          <div class="flex justify-between text-sm text-gray-500 dark:text-gray-400 mt-2">
             <span>1 song</span>
             <span>30 songs</span>
           </div>
         </div>
 
         <!-- Games Count Selector -->
-        <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <label class="block text-lg font-semibold text-gray-800 mb-4">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
+          <label class="block text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">
             Number of games: <span id="gamesCountValue" class="text-primary">1</span>
           </label>
           <input type="range" id="gamesCountSlider" min="1" max="5" value="1" step="1"
-            class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary">
-          <div class="flex justify-between text-sm text-gray-500 mt-2">
+            class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary">
+          <div class="flex justify-between text-sm text-gray-500 dark:text-gray-400 mt-2">
             <span>1 game</span>
             <span>5 games</span>
           </div>
@@ -345,14 +346,14 @@
         </div>
 
         <!-- Progress Indicator -->
-        <div id="generatingProgress" class="bg-white rounded-2xl shadow-lg p-6 mb-6 hidden">
-          <h3 class="text-lg font-bold text-gray-800 mb-4">Generating questions...</h3>
-          <div class="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">
+        <div id="generatingProgress" class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6 hidden">
+          <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-4">Generating questions...</h3>
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 mb-2 overflow-hidden">
             <div id="progressBarFill"
               class="bg-gradient-to-r from-indigo-600 to-purple-600 h-3 rounded-full transition-all duration-300"
               style="width: 0%"></div>
           </div>
-          <p id="progressText" class="text-sm text-gray-600 text-center">
+          <p id="progressText" class="text-sm text-gray-600 dark:text-gray-400 text-center">
 
           </p>
         </div>
@@ -367,12 +368,14 @@
     <!-- Game Screen -->
     <div id="gameScreen" class="screen hidden">
       <!-- Compact PIN/QR Code Display (Top Right Corner) -->
-      <div class="fixed top-20 right-6 z-40 bg-white rounded-lg shadow-lg p-4 border-2 border-indigo-200">
+      <div
+        class="fixed top-20 right-6 z-40 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 border-2 border-indigo-200 dark:border-indigo-700">
         <div class="text-center">
-          <p class="text-xs text-gray-600 font-semibold mb-1">Join Game</p>
-          <div class="text-2xl font-bold text-indigo-600 tracking-wider mb-2" id="compactRoomPin">----</div>
+          <p class="text-xs text-gray-600 dark:text-gray-400 font-semibold mb-1">Join Game</p>
+          <div class="text-2xl font-bold text-indigo-600 dark:text-indigo-400 tracking-wider mb-2" id="compactRoomPin">
+            ----</div>
           <div id="compactQrcode" class="inline-block"></div>
-          <p class="text-xs text-gray-500 mt-2">Scan to join</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Scan to join</p>
         </div>
       </div>
 
@@ -397,10 +400,10 @@
           <!-- Timer Progress Bar -->
           <div class="mb-4">
             <div class="flex justify-between items-center mb-2">
-              <span class="text-sm font-semibold text-gray-600">Time Remaining</span>
+              <span class="text-sm font-semibold text-gray-600 dark:text-gray-400">Time Remaining</span>
               <span id="timeRemaining" class="text-sm font-bold text-primary">10s</span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
               <div id="timerProgress"
                 class="bg-gradient-to-r from-green-500 to-emerald-600 h-2 rounded-full transition-all duration-100"
                 style="width: 100%"></div>
@@ -411,7 +414,7 @@
           <audio id="audioPlayer" class="hidden"></audio>
 
           <!-- Audio Visualizer -->
-          <div class="mb-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
+          <div class="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
             <canvas id="audioVisualizer" width="800" height="120" class="w-full rounded"></canvas>
           </div>
 

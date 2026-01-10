@@ -510,6 +510,22 @@ async function loadDeviceList() {
     return;
   }
 
+  // Debug: Log all device information
+  console.log('=== Available Spotify Devices ===');
+  availableDevices.forEach((device, index) => {
+    console.log(`Device ${index + 1}:`, {
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      is_active: device.is_active,
+      is_private_session: device.is_private_session,
+      is_restricted: device.is_restricted,
+      volume_percent: device.volume_percent,
+      supports_volume: device.supports_volume
+    });
+  });
+  console.log('================================');
+
   listContainer.classList.remove('hidden');
   deviceList.innerHTML = '';
 
@@ -530,8 +546,8 @@ async function loadDeviceList() {
       <div class="flex items-center gap-4">
         <div class="text-3xl">${deviceIcon}</div>
         <div class="flex-1">
-          <h4 class="font-semibold text-gray-800">${device.name}</h4>
-          <p class="text-sm text-gray-600">${device.type} • ${device.volume_percent}% volume</p>
+          <h4 class="font-semibold text-gray-800 dark:text-gray-200">${device.name}</h4>
+          <p class="text-sm text-gray-600 dark:text-gray-400">${device.type} • ${device.volume_percent}% volume</p>
         </div>
         ${isActive}
       </div>
@@ -579,6 +595,24 @@ function selectDevice(device) {
   console.log('Selected device:', device);
 }
 
+function disconnectFromDevice() {
+  selectedConnectDevice = null;
+  useSpotifyConnect = false;
+
+  // Update UI
+  updateConnectButton();
+
+  // Reinitialize Web SDK player if needed
+  if (spotifyAccessToken && window.Spotify && !spotifyPlayer) {
+    initializeSpotifyPlayer();
+  }
+
+  // Show notification
+  showNotification('Switched back to Web Playback SDK', 'info');
+
+  console.log('Disconnected from Connect device, using Web SDK');
+}
+
 function updateConnectButton() {
   const connectBtn = document.getElementById('connectDeviceBtn');
   const label = document.getElementById('connectDeviceLabel');
@@ -586,7 +620,14 @@ function updateConnectButton() {
   if (!connectBtn) return;
 
   if (selectedConnectDevice) {
-    label.textContent = `📺 ${selectedConnectDevice.name}`;
+    label.innerHTML = `
+      <span>📺 ${selectedConnectDevice.name}</span>
+      <button onclick="event.stopPropagation(); disconnectFromDevice();" 
+        class="ml-2 px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded transition"
+        title="Switch back to Web SDK">
+        × Use Web SDK
+      </button>
+    `;
     connectBtn.classList.add('bg-green-50', 'border', 'border-green-500');
   } else {
     label.textContent = 'Connect Device';
@@ -867,6 +908,7 @@ startGameBtn.addEventListener('click', () => {
   // Disable button and show progress
   startGameBtn.disabled = true;
   startGameBtn.textContent = 'Generating questions...';
+  startGameBtn.classList.add('hidden');
 
   // Hide song count and games count selectors, show progress
   const songCountContainer = document.querySelector('.bg-white.rounded-2xl.shadow-lg.p-6.mb-6:has(#songCountSlider)');
@@ -991,6 +1033,7 @@ socket.on('game_started', (data) => {
 
   startGameBtn.disabled = false;
   startGameBtn.textContent = 'Start Game';
+  startGameBtn.classList.remove('hidden');
 
   totalSongs.textContent = data.total_songs;
 
@@ -1746,8 +1789,9 @@ function visualize(canvas, canvasCtx) {
     animationId = requestAnimationFrame(draw);
     analyser.getByteFrequencyData(dataArray);
 
-    // Clear canvas with solid background matching the card
-    canvasCtx.fillStyle = '#ffffff';
+    // Clear canvas with background matching theme
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
 
     const barWidth = (canvas.width / bufferLength) * 2.5;
@@ -1817,8 +1861,9 @@ function simulatedVisualize(canvas, canvasCtx, trackName) {
     beatPhase *= 0.85;
     energy += (targetEnergy - energy) * 0.05;
 
-    // Clear canvas with solid background matching the card
-    canvasCtx.fillStyle = '#ffffff';
+    // Clear canvas with background matching theme
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
 
     const barWidth = canvas.width / bars - 2;
@@ -1874,11 +1919,12 @@ function stopVisualization() {
     cancelAnimationFrame(animationId);
   }
 
-  // Clear canvas with white background
+  // Clear canvas with background matching theme
   const canvas = document.getElementById('audioVisualizer');
   if (canvas) {
     const canvasCtx = canvas.getContext('2d');
-    canvasCtx.fillStyle = '#ffffff';
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
   }
 }
@@ -1985,7 +2031,7 @@ async function loadUserProfile() {
 
     if (response.ok) {
       userProfile = await response.json();
-      updateProfileUI(userProfile);
+      await updateProfileUI(userProfile);
     } else {
       console.log('User not authenticated');
     }
@@ -1994,7 +2040,31 @@ async function loadUserProfile() {
   }
 }
 
-function updateProfileUI(profile) {
+// Cache avatar to avoid repeated API calls for menu
+async function getCachedAvatar(seed, backgroundColor = '667eea') {
+  const cacheKey = `avatar_${seed}_${backgroundColor}`;
+  let cached = sessionStorage.getItem(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  // Fetch and cache the avatar
+  const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=${backgroundColor}&fontSize=40`;
+  try {
+    const response = await fetch(avatarUrl);
+    const svgText = await response.text();
+    // Use URI encoding instead of base64 for SVG (avoids UTF-8 issues)
+    const dataUrl = 'data:image/svg+xml,' + encodeURIComponent(svgText);
+    sessionStorage.setItem(cacheKey, dataUrl);
+    return dataUrl;
+  } catch (error) {
+    console.error('Failed to fetch avatar:', error);
+    return avatarUrl; // Fallback to direct URL
+  }
+}
+
+async function updateProfileUI(profile) {
   // Update avatar images
   const displayName = profile.display_name || 'User';
   const userAvatar = document.getElementById('userAvatar');
@@ -2004,10 +2074,10 @@ function updateProfileUI(profile) {
     if (userAvatar) userAvatar.src = profile.profile_image;
     if (menuAvatar) menuAvatar.src = profile.profile_image;
   } else {
-    // Use DiceBear avatar with initials as fallback
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
-    if (userAvatar) userAvatar.src = avatarUrl;
-    if (menuAvatar) menuAvatar.src = avatarUrl;
+    // Use cached DiceBear avatar for menu (faster loading)
+    const cachedAvatarUrl = await getCachedAvatar(displayName);
+    if (userAvatar) userAvatar.src = cachedAvatarUrl;
+    if (menuAvatar) menuAvatar.src = cachedAvatarUrl;
   }
 
   // Update display name

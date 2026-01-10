@@ -270,14 +270,38 @@
 
         if (response.ok) {
           userProfile = await response.json();
-          updateProfileUI(userProfile);
+          await updateProfileUI(userProfile);
         }
       } catch (error) {
         console.error('Failed to load profile:', error);
       }
     }
 
-    function updateProfileUI(profile) {
+    // Cache avatar to avoid repeated API calls for menu
+    async function getCachedAvatar(seed, backgroundColor = '667eea') {
+      const cacheKey = `avatar_${seed}_${backgroundColor}`;
+      let cached = sessionStorage.getItem(cacheKey);
+
+      if (cached) {
+        return cached;
+      }
+
+      // Fetch and cache the avatar
+      const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=${backgroundColor}&fontSize=40`;
+      try {
+        const response = await fetch(avatarUrl);
+        const svgText = await response.text();
+        // Use URI encoding instead of base64 for SVG (avoids UTF-8 issues)
+        const dataUrl = 'data:image/svg+xml,' + encodeURIComponent(svgText);
+        sessionStorage.setItem(cacheKey, dataUrl);
+        return dataUrl;
+      } catch (error) {
+        console.error('Failed to fetch avatar:', error);
+        return avatarUrl; // Fallback to direct URL
+      }
+    }
+
+    async function updateProfileUI(profile) {
       // Update avatar images
       const displayName = profile.display_name || 'User';
       const userAvatar = document.getElementById('userAvatar');
@@ -287,10 +311,10 @@
         if (userAvatar) userAvatar.src = profile.profile_image;
         if (menuAvatar) menuAvatar.src = profile.profile_image;
       } else {
-        // Use DiceBear avatar with initials as fallback
-        const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
-        if (userAvatar) userAvatar.src = avatarUrl;
-        if (menuAvatar) menuAvatar.src = avatarUrl;
+        // Use cached DiceBear avatar for menu (faster loading)
+        const cachedAvatarUrl = await getCachedAvatar(displayName);
+        if (userAvatar) userAvatar.src = cachedAvatarUrl;
+        if (menuAvatar) menuAvatar.src = cachedAvatarUrl;
       }
 
       // Update display name
