@@ -635,19 +635,8 @@ function updateConnectButton() {
   }
 }
 
-function showNotification(message, type = 'info') {
-  const notification = document.createElement('div');
-  const bgColor = type === 'success' ? 'bg-green-500' : 'bg-blue-500';
-
-  notification.className = `fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in`;
-  notification.textContent = message;
-  document.body.appendChild(notification);
-
-  setTimeout(() => {
-    notification.style.opacity = '0';
-    notification.style.transition = 'opacity 0.3s';
-    setTimeout(() => notification.remove(), 300);
-  }, 3000);
+function showNotification(message, type) {
+  showToast(message, type);
 }
 
 // ============ End Spotify Connect Functions ============
@@ -1262,16 +1251,11 @@ function updateParticipantsList(participants) {
   participantCount.textContent = participants.length;
   participantsList.innerHTML = '';
 
-  // Random color palette for avatars
-  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
-
   participants.forEach((p, index) => {
     const li = document.createElement('li');
     li.className = 'flex items-center gap-3 p-2 bg-gray-50 rounded-lg';
 
-    // Use random color based on player index
-    const color = colors[index % colors.length];
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name)}&backgroundColor=${color}&fontSize=40`;
+    const avatarUrl = getAvatarUrl(p.name, index);
 
     li.innerHTML = `
       <img src="${avatarUrl}" alt="${p.name}" class="w-8 h-8 rounded-full">
@@ -1473,17 +1457,7 @@ function displayVotedParticipant(playerName, responseTimeMs) {
     return;
   }
 
-  // Color palette matching the app's design theme (indigo/purple/pink spectrum)
-  const colors = ['667eea', '764ba2', '8b5cf6', '9333ea', 'a855f7', 'c084fc', 'd8b4fe', 'e879f9', 'f0abfc', 'f9a8d4'];
-
-  // Use a hash of the name to consistently assign the same color to the same player
-  let hash = 0;
-  for (let i = 0; i < playerName.length; i++) {
-    hash = playerName.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const colorIndex = Math.abs(hash) % colors.length;
-  const color = colors[colorIndex];
-  const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(playerName)}&backgroundColor=${color}&fontSize=40`;
+  const avatarUrl = getAvatarUrlByName(playerName);
 
   // Format response time
   let timeDisplay = '';
@@ -1549,16 +1523,11 @@ function updateScoreboard(scores) {
 function updateIntermediateScoreboard(scores) {
   intermediateScoresList.innerHTML = '';
 
-  // Random color palette for avatars
-  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
-
   scores.forEach((player, index) => {
     const div = document.createElement('div');
     div.className = 'flex items-center justify-between p-4 bg-gray-50 rounded-lg';
 
-    // Use random color based on player index
-    const color = colors[index % colors.length];
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
+    const avatarUrl = getAvatarUrl(player.name, index);
 
     // Format points gained display
     const pointsGainedHtml = player.points_gained > 0
@@ -1639,15 +1608,12 @@ function displayGameEndScores(gameScores, seriesScores, currentGame, totalGames)
     }
   }, 1000);
 
-  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
-
   // Display game scores
   const gameScoresList = modal.querySelector('#gameScoresList');
   gameScores.forEach((player, index) => {
     const div = document.createElement('div');
     div.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg';
-    const color = colors[index % colors.length];
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
+    const avatarUrl = getAvatarUrl(player.name, index);
 
     div.innerHTML = `
       <div class="flex items-center gap-3">
@@ -1665,8 +1631,7 @@ function displayGameEndScores(gameScores, seriesScores, currentGame, totalGames)
   seriesScores.forEach((player, index) => {
     const div = document.createElement('div');
     div.className = 'flex items-center justify-between p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border-2 border-primary';
-    const color = colors[index % colors.length];
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
+    const avatarUrl = getAvatarUrl(player.name, index);
 
     let medal = '';
     if (index === 0) medal = '🥇';
@@ -1698,9 +1663,6 @@ function startNextGameNow(button) {
 function displayFinalScores(scores, gamesPlayed) {
   finalScores.innerHTML = '';
 
-  // Random color palette for avatars
-  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
-
   // Update title if multiple games
   const endTitle = document.querySelector('#endScreen h1');
   if (endTitle && gamesPlayed > 1) {
@@ -1716,9 +1678,7 @@ function displayFinalScores(scores, gamesPlayed) {
     else if (index === 1) medal = '🥈';
     else if (index === 2) medal = '🥉';
 
-    // Use random color based on player index
-    const color = colors[index % colors.length];
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(player.name)}&backgroundColor=${color}&fontSize=40`;
+    const avatarUrl = getAvatarUrl(player.name, index);
 
     // Use series_score for multi-game, score for single game
     const finalScore = player.series_score !== undefined ? player.series_score : player.score;
@@ -2040,30 +2000,6 @@ async function loadUserProfile() {
   }
 }
 
-// Cache avatar to avoid repeated API calls for menu
-async function getCachedAvatar(seed, backgroundColor = '667eea') {
-  const cacheKey = `avatar_${seed}_${backgroundColor}`;
-  let cached = sessionStorage.getItem(cacheKey);
-
-  if (cached) {
-    return cached;
-  }
-
-  // Fetch and cache the avatar
-  const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=${backgroundColor}&fontSize=40`;
-  try {
-    const response = await fetch(avatarUrl);
-    const svgText = await response.text();
-    // Use URI encoding instead of base64 for SVG (avoids UTF-8 issues)
-    const dataUrl = 'data:image/svg+xml,' + encodeURIComponent(svgText);
-    sessionStorage.setItem(cacheKey, dataUrl);
-    return dataUrl;
-  } catch (error) {
-    console.error('Failed to fetch avatar:', error);
-    return avatarUrl; // Fallback to direct URL
-  }
-}
-
 async function updateProfileUI(profile) {
   // Update avatar images
   const displayName = profile.display_name || 'User';
@@ -2232,22 +2168,6 @@ function applySettings(settings) {
   // Other settings can be applied as needed
 }
 
-function showNotification(message, type = 'info') {
-  const toast = document.createElement('div');
-  toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${type === 'success' ? 'bg-green-500' :
-    type === 'error' ? 'bg-red-500' :
-      'bg-blue-500'
-    } text-white font-medium transition-opacity duration-300`;
-  toast.textContent = message;
-
-  document.body.appendChild(toast);
-
-  setTimeout(() => {
-    toast.classList.add('opacity-0');
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
-}
-
 // Connection resilience handlers
 socket.on('disconnect', (reason) => {
   console.log('Disconnected:', reason);
@@ -2260,7 +2180,7 @@ socket.on('disconnect', (reason) => {
   }
 
   // Show reconnection UI
-  showReconnectingOverlay();
+  showReconnectingOverlay(reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
 });
 
 socket.on('connect', () => {
@@ -2287,7 +2207,7 @@ socket.on('connect_error', (error) => {
   reconnectAttempts++;
 
   // Update the overlay with current attempt count
-  updateReconnectingOverlay();
+  updateReconnectingOverlay(reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
 
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     hideReconnectingOverlay();
@@ -2356,51 +2276,3 @@ socket.on('rejoin_failed', (data) => {
   showConnectionFailedError(data.message);
 });
 
-function showReconnectingOverlay() {
-  // Remove existing overlay if present
-  hideReconnectingOverlay();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'reconnectOverlay';
-  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
-  overlay.innerHTML = `
-    <div class="bg-white rounded-lg p-8 text-center max-w-md">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-      <p class="text-lg font-semibold text-gray-800">Connection lost</p>
-      <p class="text-gray-600 mt-2">Attempting to reconnect...</p>
-      <p id="reconnectAttemptCount" class="text-sm text-gray-500 mt-4">Attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS}</p>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-}
-
-function updateReconnectingOverlay() {
-  const attemptCountElement = document.getElementById('reconnectAttemptCount');
-  if (attemptCountElement) {
-    attemptCountElement.textContent = `Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`;
-  }
-}
-
-function hideReconnectingOverlay() {
-  const overlay = document.getElementById('reconnectOverlay');
-  if (overlay) {
-    overlay.remove();
-  }
-}
-
-function showConnectionFailedError(message = 'Unable to reconnect to the server') {
-  const overlay = document.createElement('div');
-  overlay.id = 'connectionFailedOverlay';
-  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
-  overlay.innerHTML = `
-    <div class="bg-white rounded-lg p-8 text-center max-w-md">
-      <div class="text-red-500 text-5xl mb-4">⚠️</div>
-      <p class="text-lg font-semibold text-gray-800 mb-2">Connection Failed</p>
-      <p class="text-gray-600 mb-6">${message}</p>
-      <button onclick="location.reload()" class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark">
-        Refresh Page
-      </button>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-}
