@@ -6,6 +6,9 @@ import difflib
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 from openai import OpenAI
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -285,7 +288,7 @@ class OpenAIService:
                     max_completion_tokens=900,
                 )
             except Exception as e:
-                print(f"Error generating funny fake artists batch: {e}")
+                logger.error(f"Error generating funny fake artists batch: {e}")
                 break
 
             obj = self._extract_json_object(text)
@@ -344,7 +347,7 @@ class OpenAIService:
                                 results[idx] = ""
                     except Exception as e:
                         # If embeddings fail, we fall back to the prompt-only constraint.
-                        print(f"Semantic hint check skipped (embeddings error): {e}")
+                        logger.warning(f"Semantic hint check skipped (embeddings error): {e}")
 
             for idx in proposed_indices:
                 fun = results[idx]
@@ -492,7 +495,7 @@ class OpenAIService:
                     max_completion_tokens=900,
                 )
             except Exception as e:
-                print(f"Error generating real distractors batch: {e}")
+                logger.error(f"Error generating real distractors batch: {e}")
                 break
 
             obj = self._extract_json_object(text)
@@ -665,7 +668,7 @@ class OpenAIService:
             return cleaned[:count]
 
         except Exception as e:
-            print(f"Error generating fake artists: {e}")
+            logger.error(f"Error generating fake artists: {e}")
             return []
 
 
@@ -704,7 +707,7 @@ class OpenAIService:
 #             return fake_names[:count]
         
 #         except Exception as e:
-#             print(f"Error generating fake artists: {e}")
+#             logger.error(f"Error generating fake artists: {e}")
 #             # Fallback to generic fake names
 #             return [
 #                 f"The {correct_artist[0]}{correct_artist[-1]} Band",
@@ -717,5 +720,5 @@ def get_openai_service():
     try:
         return OpenAIService()
     except ValueError as e:
-        print(f"Warning: {e}")
+        logger.warning(f"Warning: {e}")
         return None
