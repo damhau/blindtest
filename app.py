@@ -25,6 +25,10 @@ from libs.openai_service import get_openai_service
 
 load_dotenv()
 
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key")
 app.config["SESSION_COOKIE_SECURE"] = False  # Set to True in production with HTTPS
@@ -379,14 +383,14 @@ def callback():
         # Store token and user_id in session
         session["spotify_token"] = token_info
         session["spotify_user_id"] = user_id
-        print(
+        logger.info(
             f"User {user_id} authenticated with Spotify, token expires at {token_info.get('expires_at')}"
         )
-        print(f"Access token last 10 chars: {token_info.get('access_token')[-10:]}")
-        print(f"Refresh token last 10 chars: {token_info.get('refresh_token')[-10:]}")
+        logger.debug(f"Access token last 10 chars: {token_info.get('access_token')[-10:]}")
+        logger.debug(f"Refresh token last 10 chars: {token_info.get('refresh_token')[-10:]}")
         session["authenticated"] = True
     except Exception as e:
-        print(f"Error getting user info: {e}")
+        logger.error(f"Error getting user info: {e}")
         # Fallback to non-user-specific cache
         session["spotify_token"] = token_info
         session["authenticated"] = True
@@ -437,7 +441,7 @@ def get_user_profile():
         user_info = sp_client.current_user()
         return jsonify(user_info)
     except Exception as e:
-        print(f"Error fetching user profile: {e}")
+        logger.error(f"Error fetching user profile: {e}")
         return jsonify({"error": "Failed to fetch user profile"}), 500
 
 
@@ -456,9 +460,9 @@ def logout():
             if os.path.exists(cache_path) and os.path.isfile(cache_path):
                 try:
                     os.remove(cache_path)
-                    print(f"Removed legacy cached token at {cache_path}")
+                    logger.info(f"Removed legacy cached token at {cache_path}")
                 except Exception as e:
-                    print(f"Could not remove cache file {cache_path}: {e}")
+                    logger.error(f"Could not remove cache file {cache_path}: {e}")
 
     session.clear()
     return redirect("/")
@@ -484,7 +488,7 @@ def get_spotify_token():
 
     # Refresh token if needed
     if user_oauth and user_oauth.sp_oauth.is_token_expired(token_info):
-        print(f"Access token expired, refreshing...")
+        logger.debug(f"Access token expired, refreshing...")
         token_info = user_oauth.sp_oauth.refresh_access_token(token_info["refresh_token"])
         session["spotify_token"] = token_info
 
@@ -521,14 +525,14 @@ def get_user_profile_api():
         try:
             top_artists = sp_client.current_user_top_artists(limit=5, time_range="medium_term")
         except Exception as e:
-            print(f"Error fetching top artists: {e}")
+            logger.error(f"Error fetching top artists: {e}")
             top_artists = None
 
         # Get user's saved tracks count
         try:
             saved_tracks = sp_client.current_user_saved_tracks(limit=1)
         except Exception as e:
-            print(f"Error fetching saved tracks: {e}")
+            logger.error(f"Error fetching saved tracks: {e}")
             saved_tracks = None
 
         profile_data = {
@@ -557,7 +561,7 @@ def get_user_profile_api():
         return jsonify(profile_data)
 
     except Exception as e:
-        print(f"Error fetching profile: {e}")
+        logger.error(f"Error fetching profile: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -641,7 +645,7 @@ def my_playlists():
             for playlist in results["items"]:
                 if playlist:
                     playlist_name = playlist["name"]
-                    # print(f"Found playlist: {playlist_name} by {playlist['owner']['display_name']}")
+                    # logger.info(f"Found playlist: {playlist_name} by {playlist['owner']['display_name']}")
                     playlists.append(
                         {
                             "id": playlist["id"],
@@ -654,23 +658,23 @@ def my_playlists():
 
             # Check if there are more playlists to fetch
             if results["next"]:
-                print(f"Fetching next page of playlists...")
+                logger.debug(f"Fetching next page of playlists...")
                 results = sp_client.next(results)
             else:
                 break
 
-        print(f"Loaded {len(playlists)} playlists for user (including Liked Songs)")
-        # print(f"Playlist names: {[p['name'] for p in playlists]}")
+        logger.info(f"Loaded {len(playlists)} playlists for user (including Liked Songs)")
+        # logger.info(f"Playlist names: {[p['name'] for p in playlists]}")
         return jsonify({"playlists": playlists})
 
     except Exception as e:
-        print(f"Error fetching playlists: {e}")
+        logger.error(f"Error fetching playlists: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @socketio.on("connect")
 def handle_connect():
-    print(f"Client connected: {request.sid}")
+    logger.info(f"Client connected: {request.sid}")
 
     # Check if this client has Spotify auth
     token_info = session.get("spotify_token")
@@ -682,7 +686,7 @@ def handle_connect():
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    print(f"Client disconnected: {request.sid}")
+    logger.info(f"Client disconnected: {request.sid}")
     sid = request.sid
 
     # Check if disconnected user was a host or participant
@@ -692,7 +696,7 @@ def handle_disconnect():
             room.host_disconnected = True
             room.host_disconnect_time = time.time()
 
-            print(f"Host disconnected from room {pin}, grace period for reconnection")
+            logger.info(f"Host disconnected from room {pin}, grace period for reconnection")
 
             # Notify all participants that host is temporarily disconnected
             socketio.emit(
@@ -708,7 +712,7 @@ def handle_disconnect():
             participant["disconnected"] = True
             participant["disconnect_time"] = time.time()
 
-            print(
+            logger.info(
                 f"Participant {participant['name']} marked as disconnected, grace period for reconnection"
             )
 
@@ -740,7 +744,7 @@ def handle_create_room(data):
         {"pin": pin, "playlist_id": playlist_id, "authenticated": token_info is not None},
     )
 
-    print(f"Room created: {pin} by {request.sid} (OAuth: {token_info is not None})")
+    logger.info(f"Room created: {pin} by {request.sid} (OAuth: {token_info is not None})")
 
 
 @socketio.on("join_room")
@@ -769,12 +773,12 @@ def handle_join_room(data):
         response_data["current_question"] = room.question_index + 1
         response_data["total_questions"] = len(room.questions)
         response_data["current_scores"] = room.get_scores()
-        print(
+        logger.info(
             f"Player {name} joined room {pin} mid-game (question {room.question_index + 1}/{len(room.questions)})"
         )
     else:
         response_data["mid_game"] = False
-        print(f"Player {name} joined room {pin}")
+        logger.info(f"Player {name} joined room {pin}")
 
     emit("room_joined", response_data)
 
@@ -797,7 +801,7 @@ def handle_rejoin(data):
     name = data.get("name")
     was_host = data.get("was_host", False)
 
-    print(f"Rejoin attempt - PIN: {pin}, Name: {name}, Was Host: {was_host}")
+    logger.info(f"Rejoin attempt - PIN: {pin}, Name: {name}, Was Host: {was_host}")
 
     if pin not in rooms:
         emit("rejoin_failed", {"message": "Room no longer exists"})
@@ -807,7 +811,7 @@ def handle_rejoin(data):
 
     if was_host:
         # Host reconnecting with new SID
-        print(f"Host rejoining room {pin} with new SID {request.sid} (old: {room.host_sid})")
+        logger.info(f"Host rejoining room {pin} with new SID {request.sid} (old: {room.host_sid})")
 
         # Update host SID and clear disconnected flags
         old_host_sid = room.host_sid
@@ -843,7 +847,7 @@ def handle_rejoin(data):
             "host_reconnected", {"message": "Host reconnected"}, room=pin, skip_sid=request.sid
         )
 
-        print(f"Host successfully rejoined room {pin}")
+        logger.info(f"Host successfully rejoined room {pin}")
 
     else:
         # Regular participant rejoining
@@ -855,7 +859,7 @@ def handle_rejoin(data):
                 break
 
         if old_sid:
-            print(
+            logger.info(
                 f"Participant {name} rejoining room {pin} with new SID {request.sid} (old: {old_sid})"
             )
 
@@ -903,10 +907,10 @@ def handle_rejoin(data):
                 skip_sid=request.sid,
             )
 
-            print(f"Participant {name} successfully rejoined room {pin} with score {current_score}")
+            logger.info(f"Participant {name} successfully rejoined room {pin} with score {current_score}")
         else:
             # Participant not found - treat as new join
-            print(f"Participant {name} not found in room {pin}, treating as new join")
+            logger.info(f"Participant {name} not found in room {pin}, treating as new join")
             emit(
                 "rejoin_failed",
                 {"message": "Participant not found in room. Please join as new player."},
@@ -926,7 +930,7 @@ def handle_start_game(data):
     song_count = max(1, min(30, song_count))  # Clamp between 1 and 30
     games_count = max(1, min(5, games_count))  # Clamp between 1 and 5
 
-    print(f"Starting game series in room {pin}: {games_count} game(s) with {song_count} songs each")
+    logger.info(f"Starting game series in room {pin}: {games_count} game(s) with {song_count} songs each")
 
     if pin not in rooms:
         emit("error", {"message": "Room not found"})
@@ -1003,13 +1007,13 @@ def handle_start_game(data):
     tracks_pool = list(tracks)
 
     # Best-effort playlist context (helps decade/mixed playlists).
-    print("\n=== 🎵 Playlist Context Analysis ===")
+    logger.info("\n=== 🎵 Playlist Context Analysis ===")
     playlist_name = None
     playlist_description = None
     try:
         if room.playlist_id == "liked-songs":
             playlist_name = "Liked Songs"
-            print(f"✓ Playlist: {playlist_name} (user's liked tracks)")
+            logger.info(f"✓ Playlist: {playlist_name} (user's liked tracks)")
         elif room.token_info and spotify_oauth_service:
             # Use authenticated client for private/collaborative playlists
             sp_client, refreshed_token = spotify_oauth_service.get_spotify_client(room.token_info)
@@ -1019,31 +1023,31 @@ def handle_start_game(data):
                 info = sp_client.playlist(room.playlist_id, fields="name,description")
                 playlist_name = info.get("name")
                 playlist_description = info.get("description")
-                print(f"✓ Playlist: '{playlist_name}'")
+                logger.info(f"✓ Playlist: '{playlist_name}'")
                 if playlist_description:
                     desc_preview = (
                         playlist_description[:80] + "..."
                         if len(playlist_description) > 80
                         else playlist_description
                     )
-                    print(f"  Description: {desc_preview}")
+                    logger.info(f"  Description: {desc_preview}")
         elif spotify_service:
             info = spotify_service.sp.playlist(room.playlist_id, fields="name,description")
             playlist_name = info.get("name")
             playlist_description = info.get("description")
-            print(f"✓ Playlist: '{playlist_name}'")
+            logger.info(f"✓ Playlist: '{playlist_name}'")
             if playlist_description:
                 desc_preview = (
                     playlist_description[:80] + "..."
                     if len(playlist_description) > 80
                     else playlist_description
                 )
-                print(f"  Description: {desc_preview}")
+                logger.info(f"  Description: {desc_preview}")
     except Exception as e:
-        print(f"⚠ Could not fetch playlist context: {e}")
+        logger.warning(f"⚠ Could not fetch playlist context: {e}")
 
     # Locale hint: useful to keep distractors language/scene-consistent.
-    print("\n=== 🌍 Locale Detection ===")
+    logger.info("\n=== 🌍 Locale Detection ===")
     locale_hint = None
     try:
         if room.token_info and spotify_oauth_service:
@@ -1053,15 +1057,15 @@ def handle_start_game(data):
                 if user_profile:
                     locale_hint = user_profile.get("country")
                     if locale_hint:
-                        print(
+                        logger.info(
                             f"✓ User locale: {locale_hint} (helps keep distractors culturally relevant)"
                         )
                     else:
-                        print("⚠ No locale detected from user profile")
+                        logger.warning("⚠ No locale detected from user profile")
         else:
-            print("⚠ No authenticated user, skipping locale detection")
+            logger.warning("⚠ No authenticated user, skipping locale detection")
     except Exception as e:
-        print(f"⚠ Locale detection failed: {e}")
+        logger.warning(f"⚠ Locale detection failed: {e}")
         locale_hint = None
 
     def _norm_name(value: str) -> str:
@@ -1081,11 +1085,11 @@ def handle_start_game(data):
     playlist_artist_pool = _unique_preserve(
         [t.get("artist", "") for t in tracks_pool if t.get("artist")]
     )
-    print(f"\n=== 🎤 Artist Pool Analysis ===")
-    print(f"✓ Extracted {len(playlist_artist_pool)} unique artists from playlist for context")
+    logger.info(f"\n=== 🎤 Artist Pool Analysis ===")
+    logger.info(f"✓ Extracted {len(playlist_artist_pool)} unique artists from playlist for context")
 
     # Spotify Search validator to reduce LLM hallucinations (real artists only)
-    print("\n=== 🔍 Spotify Search Validator Setup ===")
+    logger.info("\n=== 🔍 Spotify Search Validator Setup ===")
     sp_search = None
     try:
         if room.token_info and spotify_oauth_service:
@@ -1095,11 +1099,11 @@ def handle_start_game(data):
         if not sp_search and spotify_service:
             sp_search = spotify_service.sp
         if sp_search:
-            print("✓ Spotify API validator ready (will verify LLM-generated artists are real)")
+            logger.info("✓ Spotify API validator ready (will verify LLM-generated artists are real)")
         else:
-            print("⚠ No Spotify validator available (will trust LLM output)")
+            logger.warning("⚠ No Spotify validator available (will trust LLM output)")
     except Exception as e:
-        print(f"⚠ Could not initialize Spotify search client: {e}")
+        logger.warning(f"⚠ Could not initialize Spotify search client: {e}")
         sp_search = spotify_service.sp if spotify_service else None
 
     _artist_exists_cache = {}
@@ -1201,17 +1205,17 @@ def handle_start_game(data):
 
             pool = eventlet.GreenPool(size=concurrency)
             todo = list(uniq.values())
-            print(
+            logger.info(
                 f"⚡ Prefetching Spotify validation for {len(todo)} unique artists ({label}, concurrency={concurrency})…"
             )
             for n in todo:
                 pool.spawn_n(artist_exists_on_spotify, n)
             pool.waitall()
-            print(
+            logger.info(
                 f"✓ Prefetch done ({label}): cache={len(_artist_exists_cache)}, Spotify API calls={_spotify_api_calls}"
             )
         except Exception as e:
-            print(f"⚠ Prefetch skipped ({label}): {type(e).__name__}: {e}")
+            logger.warning(f"⚠ Prefetch skipped ({label}): {type(e).__name__}: {e}")
 
     prep_total_started_at = time.time()
 
@@ -1249,16 +1253,16 @@ def handle_start_game(data):
 
     # Warn about limited audio (but allow to continue if authenticated)
     if tracks_with_audio < len(tracks):
-        print(f"Warning: Only {tracks_with_audio}/{len(tracks)} tracks have preview URLs")
+        logger.warning(f"Warning: Only {tracks_with_audio}/{len(tracks)} tracks have preview URLs")
         if room.token_info:
-            print(f"User is authenticated - allowing game to proceed without preview URLs")
+            logger.info(f"User is authenticated - allowing game to proceed without preview URLs")
 
     # Generate ALL questions for ALL games with distractor artists
     total_tracks = len(tracks)
-    print(f"\n{'='*60}")
-    print(f"🤖 Starting LLM-based distractor generation for {total_tracks} tracks")
-    print(f"   Games: {games_count} | Songs per game: {song_count}")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"🤖 Starting LLM-based distractor generation for {total_tracks} tracks")
+    logger.debug(f"   Games: {games_count} | Songs per game: {song_count}")
+    logger.info(f"{'='*60}")
 
     emit_prep_progress("Generating answer options…", 30)
 
@@ -1272,7 +1276,7 @@ def handle_start_game(data):
     used_funny = set()  # normalized
 
     if openai_service:
-        print("\n=== 🎯 GPT Real Distractors Generation ===")
+        logger.info("\n=== 🎯 GPT Real Distractors Generation ===")
         try:
             batch_items = [
                 {
@@ -1291,23 +1295,23 @@ def handle_start_game(data):
 
             # Provide a representative sample of artists to hint the playlist vibe.
             artist_sample = playlist_artist_pool[:60]
-            print(
+            logger.info(
                 f"📤 Requesting 3 real distractors per track from GPT (batch of {total_tracks})..."
             )
-            print(
+            logger.info(
                 f"   Context: {len(artist_sample)} sample artists, locale={locale_hint or 'none'}"
             )
 
             # Split large batches to avoid API timeouts/token limits
             BATCH_SIZE = 30  # Process max 30 tracks at a time
             if total_tracks > BATCH_SIZE:
-                print(
+                logger.info(
                     f"⚠ Large batch detected ({total_tracks} tracks) - splitting into chunks of {BATCH_SIZE}"
                 )
                 for batch_start in range(0, total_tracks, BATCH_SIZE):
                     batch_end = min(batch_start + BATCH_SIZE, total_tracks)
                     batch_subset = batch_items[batch_start:batch_end]
-                    print(
+                    logger.info(
                         f"   Processing batch {batch_start//BATCH_SIZE + 1}/{(total_tracks + BATCH_SIZE - 1)//BATCH_SIZE}: tracks {batch_start+1}-{batch_end}"
                     )
 
@@ -1330,11 +1334,11 @@ def handle_start_game(data):
                             gpt_real_distractors[batch_start + i] = result
 
                         batch_generated = sum(len(d) for d in batch_result)
-                        print(
+                        logger.info(
                             f"   ✓ Batch complete in {gpt_duration:.1f}s - generated {batch_generated} distractors"
                         )
                     except Exception as e:
-                        print(
+                        logger.info(
                             f"   ❌ Batch {batch_start//BATCH_SIZE + 1} failed: {type(e).__name__}: {str(e)}"
                         )
                         # Fill with empty lists so indexing doesn't break
@@ -1344,7 +1348,7 @@ def handle_start_game(data):
                     socketio.sleep(0)  # Yield between batches
 
                 total_generated = sum(len(d) for d in gpt_real_distractors)
-                print(f"✓ All batches complete - {total_generated} total distractors generated")
+                logger.info(f"✓ All batches complete - {total_generated} total distractors generated")
             else:
                 # Small batch - process all at once
                 try:
@@ -1361,39 +1365,39 @@ def handle_start_game(data):
                     )
                     gpt_duration = time.time() - gpt_start
                     total_generated = sum(len(d) for d in gpt_real_distractors)
-                    print(
+                    logger.info(
                         f"✓ GPT returned {total_generated} real distractors in {gpt_duration:.1f}s"
                     )
                 except Exception as e:
-                    print(f"❌ Real distractor generation failed: {type(e).__name__}: {str(e)}")
+                    logger.error(f"❌ Real distractor generation failed: {type(e).__name__}: {str(e)}")
                     gpt_real_distractors = [[] for _ in range(total_tracks)]
                     total_generated = 0
 
             if total_tracks > 0:
-                print(f"   Average: {total_generated / total_tracks:.1f} distractors per track")
+                logger.debug(f"   Average: {total_generated / total_tracks:.1f} distractors per track")
 
             # Diagnostic: inspect first few results
             if total_generated == 0:
-                print("⚠ WARNING: No real distractors generated!")
-                print(f"   This likely indicates an API error, timeout, or token limit")
-                print(
+                logger.warning("⚠ WARNING: No real distractors generated!")
+                logger.warning(f"   This likely indicates an API error, timeout, or token limit")
+                logger.info(
                     f"   Result type: {type(gpt_real_distractors)}, Length: {len(gpt_real_distractors)}"
                 )
                 if len(gpt_real_distractors) > 0:
-                    print(f"   First 3 elements: {gpt_real_distractors[:3]}")
+                    logger.debug(f"   First 3 elements: {gpt_real_distractors[:3]}")
             else:
                 # Show sample of what was generated
                 non_empty = [d for d in gpt_real_distractors if d]
                 if non_empty:
-                    print(
+                    logger.info(
                         f"   Sample results: {non_empty[0][:2] if len(non_empty[0]) >= 2 else non_empty[0]}"
                     )
 
-            print("\n=== 😄 GPT Funny Distractors Generation ===")
+            logger.info("\n=== 😄 GPT Funny Distractors Generation ===")
             funny_items = [batch_items[i] for i in range(total_tracks) if funny_enabled[i]]
             funny_indices = [i for i in range(total_tracks) if funny_enabled[i]]
             if funny_items:
-                print(
+                logger.info(
                     f"📤 Requesting funny options for {len(funny_items)}/{total_tracks} tracks ({int(len(funny_items)/total_tracks*100)}%)..."
                 )
                 try:
@@ -1409,19 +1413,19 @@ def handle_start_game(data):
                     )
                     funny_duration = time.time() - funny_start
                     funny_count = sum(1 for f in funny_generated if f)
-                    print(
+                    logger.info(
                         f"✓ GPT returned {funny_count} funny distractors in {funny_duration:.1f}s"
                     )
                     for local_i, original_i in enumerate(funny_indices):
                         if local_i < len(funny_generated):
                             gpt_funny_distractors[original_i] = funny_generated[local_i]
                 except Exception as e:
-                    print(f"❌ Funny distractor generation failed: {type(e).__name__}: {str(e)}")
+                    logger.error(f"❌ Funny distractor generation failed: {type(e).__name__}: {str(e)}")
             else:
-                print("⚠ No funny distractors requested (probability check failed)")
+                logger.warning("⚠ No funny distractors requested (probability check failed)")
         except Exception as e:
-            print(f"\n❌ Batch distractor generation failed: {e}")
-            print("   Will use fallback methods per-track")
+            logger.error(f"\n❌ Batch distractor generation failed: {e}")
+            logger.warning("   Will use fallback methods per-track")
 
     emit_prep_progress("Verifying answer options…", 65)
 
@@ -1441,9 +1445,9 @@ def handle_start_game(data):
         return None
 
     # One repair round: for tracks where Spotify validation removes too many "real" picks
-    print("\n=== ✅ Spotify Validation & Repair Round ===")
+    logger.info("\n=== ✅ Spotify Validation & Repair Round ===")
     if openai_service:
-        print(f"🔍 Validating GPT-generated artists against Spotify API...")
+        logger.info(f"🔍 Validating GPT-generated artists against Spotify API...")
 
         # Warm cache in parallel to reduce wall time in the per-track loop.
         try:
@@ -1496,16 +1500,16 @@ def handle_start_game(data):
         validation_api_calls_made = (
             _spotify_api_calls - validation_start_api_calls
         )  # Actual API calls during validation
-        print(f"✓ Validation complete in {validation_duration:.1f}s")
-        print(f"   Candidates checked: {validation_attempts}")
-        print(f"   Validation passed: {validation_passed}/{validation_attempts}")
-        print(f"   Spotify API calls: {validation_api_calls_made} ({_spotify_api_calls} total)")
-        print(
+        logger.info(f"✓ Validation complete in {validation_duration:.1f}s")
+        logger.debug(f"   Candidates checked: {validation_attempts}")
+        logger.debug(f"   Validation passed: {validation_passed}/{validation_attempts}")
+        logger.debug(f"   Spotify API calls: {validation_api_calls_made} ({_spotify_api_calls} total)")
+        logger.info(
             f"   Tracks needing repair: {len(needs_repair)}/{total_tracks} ({int(len(needs_repair)/total_tracks*100)}%)"
         )
 
         if validation_attempts == 0:
-            print("⚠ WARNING: No candidates were checked! GPT may have returned empty results.")
+            logger.warning("⚠ WARNING: No candidates were checked! GPT may have returned empty results.")
 
         if needs_repair:
             # If any track needs 3 real distractors, request a slightly larger pool.
@@ -1518,7 +1522,7 @@ def handle_start_game(data):
             except Exception:
                 max_target = 2
             repair_per_item = 6 if max_target >= 3 else 4
-            print(
+            logger.info(
                 f"\n🔧 Repair Round: Requesting {repair_per_item} candidates per track for {len(needs_repair)} tracks..."
             )
             try:
@@ -1528,12 +1532,12 @@ def handle_start_game(data):
                 # Split repair batch if too large
                 REPAIR_BATCH_SIZE = 30
                 if len(needs_repair) > REPAIR_BATCH_SIZE:
-                    print(f"   Splitting repair into chunks of {REPAIR_BATCH_SIZE}...")
+                    logger.debug(f"   Splitting repair into chunks of {REPAIR_BATCH_SIZE}...")
                     repaired = [[] for _ in range(len(needs_repair))]
                     for batch_start in range(0, len(needs_repair), REPAIR_BATCH_SIZE):
                         batch_end = min(batch_start + REPAIR_BATCH_SIZE, len(needs_repair))
                         batch_subset = needs_repair[batch_start:batch_end]
-                        print(
+                        logger.info(
                             f"   Repair batch {batch_start//REPAIR_BATCH_SIZE + 1}/{(len(needs_repair) + REPAIR_BATCH_SIZE - 1)//REPAIR_BATCH_SIZE}..."
                         )
 
@@ -1552,7 +1556,7 @@ def handle_start_game(data):
                             for i, result in enumerate(batch_repaired):
                                 repaired[batch_start + i] = result
                         except Exception as e:
-                            print(f"   ❌ Repair batch failed: {type(e).__name__}: {str(e)}")
+                            logger.error(f"   ❌ Repair batch failed: {type(e).__name__}: {str(e)}")
                             for i in range(batch_start, batch_end):
                                 repaired[i] = []
 
@@ -1607,17 +1611,17 @@ def handle_start_game(data):
                 repair_api_calls = (
                     _spotify_api_calls - validation_start_api_calls - validation_api_calls_made
                 )
-                print(f"✓ Repair complete in {repair_duration:.1f}s")
-                print(f"   Successfully repaired: {repaired_count}/{len(needs_repair)} tracks")
-                print(f"   Spotify API calls during repair: {repair_api_calls}")
+                logger.info(f"✓ Repair complete in {repair_duration:.1f}s")
+                logger.debug(f"   Successfully repaired: {repaired_count}/{len(needs_repair)} tracks")
+                logger.debug(f"   Spotify API calls during repair: {repair_api_calls}")
             except Exception as e:
-                print(f"❌ Real-distractor repair batch failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"❌ Real-distractor repair batch failed: {type(e).__name__}: {str(e)}")
         else:
-            print("✓ All tracks have sufficient validated distractors")
+            logger.info("✓ All tracks have sufficient validated distractors")
 
     emit_prep_progress("Finalizing questions…", 85)
 
-    print("\n=== 🎲 Finalizing Questions (Fallback Filling) ===")
+    logger.info("\n=== 🎲 Finalizing Questions (Fallback Filling) ===")
     finalize_started_at = time.time()
 
     fallback_used_playlist = 0
@@ -1756,7 +1760,7 @@ def handle_start_game(data):
             elapsed = time.time() - finalize_started_at
             avg_ms = (elapsed / idx) * 1000.0 if idx else 0.0
             remaining = (elapsed / idx) * (total_tracks - idx) if idx else 0.0
-            print(
+            logger.info(
                 f"   • Finalizing {idx}/{total_tracks} | {elapsed:.1f}s elapsed, {avg_ms:.0f}ms/track, ~{remaining:.1f}s remaining | "
                 f"fallback slots: playlist={fallback_used_playlist}, mb={fallback_used_musicbrainz}, relaxed={fallback_used_relaxed_playlist}, unknown={fallback_used_unknown} | "
                 f"playlist scan steps={playlist_scan_steps}"
@@ -1766,20 +1770,20 @@ def handle_start_game(data):
         room.all_questions.append(question)
 
     finalize_duration = time.time() - finalize_started_at
-    print(f"\n📊 Fallback Statistics:")
-    print(f"   Tracks needing any fallback: {tracks_with_any_fallback}/{total_tracks}")
-    print(f"   Playlist pool fallbacks: {fallback_used_playlist} slots")
-    print(f"   MusicBrainz fallbacks: {fallback_used_musicbrainz} slots")
-    print(f"   Relaxed playlist fallbacks: {fallback_used_relaxed_playlist} slots")
-    print(f"   Unknown Artist fallbacks: {fallback_used_unknown} slots")
-    print(f"   Playlist scan steps: {playlist_scan_steps}")
-    print(f"   Finalizing duration: {finalize_duration:.1f}s")
-    print(f"     - Playlist pick time: {t_playlist_pick:.2f}s")
-    print(f"     - MusicBrainz pick time: {t_musicbrainz_pick:.2f}s")
-    print(f"     - Relaxed pick time: {t_relaxed_pick:.2f}s")
-    print(f"   Total Spotify API calls: {_spotify_api_calls}")
-    print(f"\n✅ All {total_tracks} questions generated successfully!")
-    print(f"{'='*60}\n")
+    logger.info(f"\n📊 Fallback Statistics:")
+    logger.debug(f"   Tracks needing any fallback: {tracks_with_any_fallback}/{total_tracks}")
+    logger.debug(f"   Playlist pool fallbacks: {fallback_used_playlist} slots")
+    logger.debug(f"   MusicBrainz fallbacks: {fallback_used_musicbrainz} slots")
+    logger.debug(f"   Relaxed playlist fallbacks: {fallback_used_relaxed_playlist} slots")
+    logger.debug(f"   Unknown Artist fallbacks: {fallback_used_unknown} slots")
+    logger.debug(f"   Playlist scan steps: {playlist_scan_steps}")
+    logger.debug(f"   Finalizing duration: {finalize_duration:.1f}s")
+    logger.debug(f"     - Playlist pick time: {t_playlist_pick:.2f}s")
+    logger.debug(f"     - MusicBrainz pick time: {t_musicbrainz_pick:.2f}s")
+    logger.debug(f"     - Relaxed pick time: {t_relaxed_pick:.2f}s")
+    logger.debug(f"   Total Spotify API calls: {_spotify_api_calls}")
+    logger.info(f"\n✅ All {total_tracks} questions generated successfully!")
+    logger.info(f"{'='*60}\n")
 
     emit_prep_progress("Starting game…", 95)
 
@@ -1814,8 +1818,8 @@ def handle_start_game(data):
 
     prep_total_duration = time.time() - prep_total_started_at
     per_track = (prep_total_duration / total_tracks) if total_tracks else 0.0
-    print(f"⏱ Total preparation time: {prep_total_duration:.1f}s ({per_track:.2f}s/track)")
-    print(
+    logger.info(f"⏱ Total preparation time: {prep_total_duration:.1f}s ({per_track:.2f}s/track)")
+    logger.info(
         f"Game started in room {pin} with {len(room.questions)} questions (OAuth: {room.token_info is not None})"
     )
 
@@ -1873,7 +1877,7 @@ def handle_playback_started(data):
     room = rooms[pin]
     current_question_index = room.question_index
 
-    print(f"Playback started for question {room.question_index + 1} in room {pin}, starting timer")
+    logger.info(f"Playback started for question {room.question_index + 1} in room {pin}, starting timer")
 
     # Notify all clients to start their timers
     socketio.emit("start_question_timer", {}, room=pin)
@@ -1883,7 +1887,7 @@ def handle_playback_started(data):
         socketio.sleep(15)
         if pin in rooms and rooms[pin].question_index == current_question_index:
             if not rooms[pin].voting_closed:
-                print(f"Question {current_question_index + 1} timeout in room {pin}")
+                logger.info(f"Question {current_question_index + 1} timeout in room {pin}")
                 socketio.emit("question_timeout", {}, room=pin)
                 close_voting_and_show_answer(pin)
 
@@ -1899,7 +1903,7 @@ def close_voting_and_show_answer(pin):
     room.voting_closed = True
     room.correct_answer_acks = set()
 
-    print(f"Closing voting for question {room.question_index + 1} in room {pin}")
+    logger.info(f"Closing voting for question {room.question_index + 1} in room {pin}")
 
     # Show correct answer immediately (no delay)
     socketio.emit(
@@ -1921,7 +1925,7 @@ def close_voting_and_show_answer(pin):
         socketio.sleep(wait_interval)
         waited += wait_interval
 
-    print(
+    logger.info(
         f"Participants acknowledged: {len(room.correct_answer_acks)}/{participant_count} after {waited:.1f}s"
     )
 
@@ -1962,7 +1966,7 @@ def handle_correct_answer_displayed(data):
 
     if pin in rooms and sid in rooms[pin].participants:
         rooms[pin].correct_answer_acks.add(sid)
-        print(
+        logger.info(
             f'Participant {rooms[pin].participants[sid]["name"]} acknowledged correct answer in room {pin}'
         )
 
@@ -1974,7 +1978,7 @@ def handle_standings_displayed(data):
     if pin not in rooms:
         return
 
-    print(f"Host displayed standings for room {pin}")
+    logger.info(f"Host displayed standings for room {pin}")
 
     # Reset ready acknowledgments
     rooms[pin].standings_ready_acks = set()
@@ -2001,12 +2005,12 @@ def handle_standings_displayed(data):
         elapsed = time.time() - standings_shown_at
         if elapsed < min_display_time:
             remaining = min_display_time - elapsed
-            print(f"Enforcing minimum display time, waiting {remaining:.1f}s more")
+            logger.info(f"Enforcing minimum display time, waiting {remaining:.1f}s more")
             socketio.sleep(remaining)
 
         ack_count = len(rooms[pin].standings_ready_acks)
         total_time = time.time() - standings_shown_at
-        print(
+        logger.info(
             f"Ready for next: {ack_count}/{participant_count} after {total_time:.1f}s total display time"
         )
 
@@ -2033,7 +2037,7 @@ def handle_standings_displayed(data):
                     },
                     room=pin,
                 )
-                print(f"Game series ended in room {pin} after {room.games_in_series} game(s)")
+                logger.info(f"Game series ended in room {pin} after {room.games_in_series} game(s)")
             else:
                 # End current game and prepare for next
                 socketio.emit(
@@ -2046,7 +2050,7 @@ def handle_standings_displayed(data):
                     },
                     room=pin,
                 )
-                print(f"Game {room.current_game_number}/{room.games_in_series} ended in room {pin}")
+                logger.info(f"Game {room.current_game_number}/{room.games_in_series} ended in room {pin}")
         else:
             # Auto-advance to next question
             socketio.emit("advance_question", {}, room=pin, to=rooms[pin].host_sid)
@@ -2061,7 +2065,7 @@ def handle_ready_for_next(data):
 
     if pin in rooms and sid in rooms[pin].participants:
         rooms[pin].standings_ready_acks.add(sid)
-        print(f'Participant {rooms[pin].participants[sid]["name"]} ready for next question')
+        logger.info(f'Participant {rooms[pin].participants[sid]["name"]} ready for next question')
 
 
 @socketio.on("start_next_game")
@@ -2099,7 +2103,7 @@ def handle_start_next_game(data):
     room.current_question = room.questions[0]
     room.state = "playing"
 
-    print(f"Loaded {len(room.questions)} unique questions for game {room.current_game_number}")
+    logger.info(f"Loaded {len(room.questions)} unique questions for game {room.current_game_number}")
 
     # Notify all players that next game is starting
     socketio.emit(
@@ -2116,7 +2120,7 @@ def handle_start_next_game(data):
     # Send first question
     send_question(pin)
 
-    print(f"Game {room.current_game_number}/{room.games_in_series} started in room {pin}")
+    logger.info(f"Game {room.current_game_number}/{room.games_in_series} started in room {pin}")
 
 
 @socketio.on("submit_answer")
@@ -2193,14 +2197,14 @@ def handle_submit_answer(data):
     # Update scores for everyone
     socketio.emit("scores_updated", {"scores": room.get_scores()}, room=pin)
 
-    print(
+    logger.info(
         f'Player {room.participants[request.sid]["name"]} answered: {answer} ({"correct" if is_correct else "incorrect"})'
     )
 
     # Check if all participants have answered
     current_answers = room.answers.get(room.question_index, {})
     if len(current_answers) == len(room.participants):
-        print(
+        logger.info(
             f"All {len(room.participants)} participants have answered question {room.question_index + 1} - music will continue until timer ends"
         )
 
@@ -2237,7 +2241,7 @@ def handle_next_question(data):
         # Game over
         room.state = "ended"
         socketio.emit("game_ended", {"final_scores": room.get_scores()}, room=pin)
-        print(f"Game ended in room {pin}")
+        logger.info(f"Game ended in room {pin}")
     else:
         # Next question
         room.current_question = room.questions[room.question_index]
@@ -2283,7 +2287,7 @@ def cleanup_disconnected_participants():
             if room.host_disconnected and room.host_disconnect_time:
                 if current_time - room.host_disconnect_time > GRACE_PERIOD:
                     # Host grace period expired, delete room
-                    print(f"Removing room {pin} - host grace period expired")
+                    logger.info(f"Removing room {pin} - host grace period expired")
                     socketio.emit(
                         "room_closed", {"message": "Host did not reconnect. Room closed."}, room=pin
                     )
@@ -2300,7 +2304,7 @@ def cleanup_disconnected_participants():
                     if current_time - disconnect_time > GRACE_PERIOD:
                         # Grace period expired, remove participant
                         sids_to_remove.append(sid)
-                        print(
+                        logger.info(
                             f"Removing participant {participant['name']} from room {pin} - grace period expired"
                         )
 

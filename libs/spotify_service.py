@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 class SpotifyService:
     def __init__(self):
@@ -86,7 +89,7 @@ class SpotifyService:
             elif '401' in error_str or '403' in error_str:
                 return [], "Authentication failed. Check your Spotify API credentials."
             else:
-                print(f"Error fetching playlist: {e}")
+                logger.error(f"Error fetching playlist: {e}")
                 return [], f"Error loading playlist: {error_str[:100]}"
 
     def search_artist(self, artist_name):
@@ -97,7 +100,7 @@ class SpotifyService:
                 return results['artists']['items'][0]['name']
             return None
         except Exception as e:
-            print(f"Error searching artist: {e}")
+            logger.error(f"Error searching artist: {e}")
             return None
 
     def get_similar_artists(self, artist_name, limit=3):
@@ -109,14 +112,14 @@ class SpotifyService:
             results = self.sp.search(q=f'artist:{artist_name}', type='artist', limit=1)
             
             if not results['artists']['items']:
-                print(f"No artist found for: {artist_name}")
+                logger.warning(f"No artist found for: {artist_name}")
                 return []
             
             artist = results['artists']['items'][0]
             artist_actual_name = artist['name']
             genres = artist.get('genres', [])
             
-            print(f"Found artist {artist_actual_name}, genres: {genres[:2]}")
+            logger.debug(f"Found artist {artist_actual_name}, genres: {genres[:2]}")
             
             # Use genre-based search (related artists endpoint deprecated)
             if genres:
@@ -126,16 +129,16 @@ class SpotifyService:
                         a['name'] for a in genre_results['artists']['items']
                         if a['name'] != artist_actual_name
                     ][:limit]
-                    print(f"Found {len(similar_names)} artists via genre search")
+                    logger.debug(f"Found {len(similar_names)} artists via genre search")
                     return similar_names
                 except Exception as e:
-                    print(f"Genre search failed: {e}")
+                    logger.error(f"Genre search failed: {e}")
             
             # Fallback: return empty and let app.py use generic names
             return []
         
         except Exception as e:
-            print(f"Error getting similar artists: {e}")
+            logger.error(f"Error getting similar artists: {e}")
             return []
 
 
@@ -144,5 +147,5 @@ def get_spotify_service():
     try:
         return SpotifyService()
     except ValueError as e:
-        print(f"Warning: {e}")
+        logger.warning(f"Warning: {e}")
         return None

@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 class SpotifyOAuthService:
     """
@@ -60,7 +63,7 @@ class SpotifyOAuthService:
             token_info = self.sp_oauth.get_access_token(code)
             return token_info
         except Exception as e:
-            print(f"Error getting access token: {e}")
+            logger.error(f"Error getting access token: {e}")
             return None
 
     def get_spotify_client(self, token_info):
@@ -70,7 +73,7 @@ class SpotifyOAuthService:
 
         # Check if token needs refresh
         if self.sp_oauth.is_token_expired(token_info):
-            print("Token expired, refreshing...")
+            logger.info("Token expired, refreshing...")
             token_info = self.sp_oauth.refresh_access_token(token_info["refresh_token"])
 
         client = spotipy.Spotify(auth=token_info["access_token"])
@@ -116,7 +119,7 @@ class SpotifyOAuthService:
             return tracks, None
 
         except Exception as e:
-            print(f"Error fetching liked songs: {e}")
+            logger.error(f"Error fetching liked songs: {e}")
             return [], f"Error fetching liked songs: {str(e)}"
 
     def extract_playlist_id(self, playlist_input):
@@ -154,7 +157,7 @@ class SpotifyOAuthService:
             try:
                 playlist_info = sp_client.playlist(playlist_id, fields="tracks.total")
                 total_tracks = playlist_info["tracks"]["total"]
-                print(f"Playlist has {total_tracks} total tracks")
+                logger.debug(f"Playlist has {total_tracks} total tracks")
             except:
                 total_tracks = fetch_pool_size
 
@@ -163,7 +166,7 @@ class SpotifyOAuthService:
                 # Small playlist: fetch all
                 pool_size = total_tracks
                 offset = 0
-                print(f"Fetching all {pool_size} tracks")
+                logger.debug(f"Fetching all {pool_size} tracks")
             else:
                 # Large playlist: fetch random chunk
                 import random
@@ -171,7 +174,7 @@ class SpotifyOAuthService:
                 pool_size = fetch_pool_size
                 max_offset = total_tracks - pool_size
                 offset = random.randint(0, max_offset)
-                print(f"Fetching {pool_size} tracks from offset {offset} (total: {total_tracks})")
+                logger.debug(f"Fetching {pool_size} tracks from offset {offset} (total: {total_tracks})")
 
             # Fetch tracks in batches with pagination
             all_tracks = []
@@ -222,7 +225,7 @@ class SpotifyOAuthService:
             if not all_tracks:
                 return [], "No tracks found in this playlist."
 
-            print(f"Fetched {len(all_tracks)} tracks from playlist")
+            logger.debug(f"Fetched {len(all_tracks)} tracks from playlist")
 
             # Randomly select from pool if limit specified
             if limit and len(all_tracks) > limit:
@@ -240,7 +243,7 @@ class SpotifyOAuthService:
             elif "401" in error_str or "403" in error_str:
                 return [], "Authentication failed. Please log in again."
             else:
-                print(f"Error fetching playlist: {e}")
+                logger.error(f"Error fetching playlist: {e}")
                 return [], f"Error loading playlist: {error_str[:100]}"
 
     def get_similar_artists(self, sp_client, artist_name, limit=3):
@@ -250,19 +253,19 @@ class SpotifyOAuthService:
             results = sp_client.search(q=f"artist:{artist_name}", type="artist", limit=1)
 
             if not results["artists"]["items"]:
-                print(f"No artist found for: {artist_name}")
+                logger.warning(f"No artist found for: {artist_name}")
                 return self._generate_plausible_names(artist_name, limit)
 
             artist = results["artists"]["items"][0]
             artist_id = artist["id"]
             artist_actual_name = artist["name"]
-            print(f"Found artist {artist_actual_name} (ID: {artist_id})")
+            logger.debug(f"Found artist {artist_actual_name} (ID: {artist_id})")
 
             # Try genre-based search (related artists endpoint is deprecated)
             genres = artist.get("genres", [])
 
             if genres:
-                print(f"Using genres: {', '.join(genres[:2])}")
+                logger.debug(f"Using genres: {', '.join(genres[:2])}")
                 # Use the first genre to find similar artists
                 try:
                     genre_results = sp_client.search(
@@ -275,13 +278,13 @@ class SpotifyOAuthService:
                     ][:limit]
 
                     if len(similar_names) >= limit:
-                        print(f"Found {len(similar_names)} artists via genre search")
+                        logger.debug(f"Found {len(similar_names)} artists via genre search")
                         return similar_names
                 except Exception as e:
-                    print(f"Genre search failed: {e}")
+                    logger.error(f"Genre search failed: {e}")
 
             # If no genres or not enough results, search for artists with similar style
-            print(f"Trying text-based search for similar artists")
+            logger.debug(f"Trying text-based search for similar artists")
             try:
                 # Search for artists that might be similar based on name patterns
                 search_results = sp_client.search(
@@ -294,17 +297,17 @@ class SpotifyOAuthService:
                 ][:limit]
 
                 if similar_names:
-                    print(f"Found {len(similar_names)} artists via text search")
+                    logger.debug(f"Found {len(similar_names)} artists via text search")
                     return similar_names
             except Exception as e:
-                print(f"Text search failed: {e}")
+                logger.error(f"Text search failed: {e}")
 
             # Ultimate fallback: generate plausible artist names
-            print(f"Using name generation fallback")
+            logger.debug(f"Using name generation fallback")
             return self._generate_plausible_names(artist_name, limit)
 
         except Exception as e:
-            print(f"Error in get_similar_artists: {e}")
+            logger.error(f"Error in get_similar_artists: {e}")
             return self._generate_plausible_names(artist_name, limit)
 
     def _generate_plausible_names(self, artist_name, count=3):
@@ -337,10 +340,10 @@ class SpotifyOAuthService:
         if os.path.exists(cache_path):
             try:
                 os.remove(cache_path)
-                print(f"Removed cached token at {cache_path}")
+                logger.info(f"Removed cached token at {cache_path}")
                 return True
             except Exception as e:
-                print(f"Could not remove cache file {cache_path}: {e}")
+                logger.error(f"Could not remove cache file {cache_path}: {e}")
                 return False
         return True
 
@@ -350,5 +353,5 @@ def get_spotify_oauth_service(user_id=None, use_cache=True):
     try:
         return SpotifyOAuthService(user_id=user_id, use_cache=use_cache)
     except ValueError as e:
-        print(f"Warning: {e}")
+        logger.warning(f"Warning: {e}")
         return None
