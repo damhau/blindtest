@@ -671,7 +671,18 @@ def handle_disconnect():
 
 @socketio.on('create_room')
 def handle_create_room(data):
-    playlist_id = data.get('playlist_id', '')
+    playlist_id = data.get('playlist_id', '').strip()
+
+    # Validate playlist_id: must be a Spotify ID, URL, or 'liked-songs'
+    if playlist_id != 'liked-songs':
+        # Extract ID from URL if needed
+        id_match = re.search(r'playlist[/:]([A-Za-z0-9]{22})', playlist_id)
+        if id_match:
+            playlist_id = id_match.group(1)
+        elif not re.fullmatch(r'[A-Za-z0-9]{22}', playlist_id):
+            emit('error', {'message': 'Invalid playlist ID'})
+            return
+
     pin = generate_pin()
     
     # Get token info for this host if authenticated.
@@ -695,8 +706,11 @@ def handle_create_room(data):
 @socketio.on('join_room')
 def handle_join_room(data):
     pin = data.get('pin', '').strip()
-    name = data.get('name', 'Anonymous')
-    
+    name = data.get('name', 'Anonymous').strip()
+
+    # Sanitize player name: limit length and strip HTML
+    name = re.sub(r'<[^>]*>', '', name)[:30] or 'Anonymous'
+
     if pin not in rooms:
         emit('error', {'message': 'Room not found'})
         return
