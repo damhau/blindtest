@@ -67,24 +67,6 @@ function hideLoading() {
   }
 }
 
-// Cookie helper functions
-function setCookie(name, value, days = 365) {
-  const date = new Date();
-  date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-  const expires = "expires=" + date.toUTCString();
-  document.cookie = name + "=" + value + ";" + expires + ";path=/";
-}
-
-function getCookie(name) {
-  const nameEQ = name + "=";
-  const ca = document.cookie.split(';');
-  for (let i = 0; i < ca.length; i++) {
-    let c = ca[i];
-    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
-    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
-  }
-  return null;
-}
 
 // Check for PIN in URL parameters and load saved name
 window.addEventListener('load', () => {
@@ -509,16 +491,11 @@ function showScreen(screen) {
 function updateWaitingParticipants(participants) {
   waitingParticipants.innerHTML = '';
 
-  // Random color palette for avatars
-  const colors = ['667eea', '764ba2', 'f093fb', '4facfe', '43e97b', 'fa709a', 'fee140', 'ff6b6b', '4ecdc4', '45b7d1'];
-
   participants.forEach((p, index) => {
     const li = document.createElement('li');
     li.className = 'flex items-center gap-3 p-2 bg-gray-50 rounded-lg';
 
-    // Use random color based on player index
-    const color = colors[index % colors.length];
-    const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(p.name)}&backgroundColor=${color}&fontSize=40`;
+    const avatarUrl = getAvatarUrl(p.name, index);
 
     li.innerHTML = `
       <img src="${avatarUrl}" alt="${p.name}" class="w-8 h-8 rounded-full">
@@ -602,7 +579,7 @@ socket.on('disconnect', (reason) => {
   }
 
   // Show reconnection UI
-  showReconnectingOverlay();
+  showReconnectingOverlay(reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
 });
 
 socket.on('connect', () => {
@@ -630,7 +607,7 @@ socket.on('connect_error', (error) => {
   reconnectAttempts++;
 
   // Update the overlay with current attempt count
-  updateReconnectingOverlay();
+  updateReconnectingOverlay(reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
 
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     hideReconnectingOverlay();
@@ -657,75 +634,6 @@ socket.on('rejoin_failed', (data) => {
   showConnectionFailedError(data.message);
 });
 
-function showReconnectingOverlay() {
-  // Remove existing overlay if present
-  hideReconnectingOverlay();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'reconnectOverlay';
-  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
-  overlay.innerHTML = `
-    <div class="bg-white rounded-lg p-8 text-center max-w-md">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-      <p class="text-lg font-semibold text-gray-800">Connection lost</p>
-      <p class="text-gray-600 mt-2">Attempting to reconnect...</p>
-      <p id="reconnectAttemptCount" class="text-sm text-gray-500 mt-4">Attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS}</p>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-}
-
-function updateReconnectingOverlay() {
-  const attemptCountElement = document.getElementById('reconnectAttemptCount');
-  if (attemptCountElement) {
-    attemptCountElement.textContent = `Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`;
-  }
-}
-
-function hideReconnectingOverlay() {
-  const overlay = document.getElementById('reconnectOverlay');
-  if (overlay) {
-    overlay.remove();
-  }
-}
-
-function showConnectionFailedError(message = 'Unable to reconnect to the server') {
-  const overlay = document.createElement('div');
-  overlay.id = 'connectionFailedOverlay';
-  overlay.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
-  overlay.innerHTML = `
-    <div class="bg-white rounded-lg p-8 text-center max-w-md">
-      <div class="text-red-500 text-5xl mb-4">⚠️</div>
-      <p class="text-lg font-semibold text-gray-800 mb-2">Connection Failed</p>
-      <p class="text-gray-600 mb-6">${message}</p>
-      <button onclick="location.reload()" class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark">
-        Refresh Page
-      </button>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-}
-
-function showNotification(message, type = 'info') {
-  const toast = document.createElement('div');
-  const bgColor = type === 'success' ? 'bg-green-500' :
-    type === 'error' ? 'bg-red-500' :
-      'bg-blue-500';
-
-  toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${bgColor} text-white font-medium transform transition-all`;
-  toast.textContent = message;
-  toast.style.transform = 'translateY(100px)';
-
-  document.body.appendChild(toast);
-
-  // Slide in animation
-  setTimeout(() => {
-    toast.style.transform = 'translateY(0)';
-  }, 10);
-
-  // Auto-remove after 3 seconds
-  setTimeout(() => {
-    toast.style.transform = 'translateY(100px)';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
+function showNotification(message, type) {
+  showToast(message, type);
 }
