@@ -416,12 +416,12 @@
 
           <!-- Audio Visualizer -->
           <div class="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-            <canvas id="audioVisualizer" width="800" height="120" class="w-full rounded"></canvas>
+            <canvas id="audioVisualizer" width="800" height="120" class="w-full rounded" role="img" aria-label="Audio visualizer"></canvas>
           </div>
 
           <!-- Answer Options Grid -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div class="answer-option bg-red-500 hover:bg-red-600 text-white p-6 rounded-xl shadow-lg" data-color="red">
+            <div class="answer-option bg-red-500 hover:bg-red-600 text-white p-6 rounded-xl shadow-lg" data-color="red" role="listitem" aria-label="Option A">
               <div class="flex items-center gap-4">
                 <span
                   class="text-3xl font-bold bg-white/20 w-12 h-12 flex items-center justify-center rounded-lg">A</span>
@@ -429,7 +429,7 @@
               </div>
             </div>
             <div class="answer-option bg-blue-500 hover:bg-blue-600 text-white p-6 rounded-xl shadow-lg"
-              data-color="blue">
+              data-color="blue" role="listitem" aria-label="Option B">
               <div class="flex items-center gap-4">
                 <span
                   class="text-3xl font-bold bg-white/20 w-12 h-12 flex items-center justify-center rounded-lg">B</span>
@@ -437,7 +437,7 @@
               </div>
             </div>
             <div class="answer-option bg-yellow-500 hover:bg-yellow-600 text-white p-6 rounded-xl shadow-lg"
-              data-color="yellow">
+              data-color="yellow" role="listitem" aria-label="Option C">
               <div class="flex items-center gap-4">
                 <span
                   class="text-3xl font-bold bg-white/20 w-12 h-12 flex items-center justify-center rounded-lg">C</span>
@@ -445,7 +445,7 @@
               </div>
             </div>
             <div class="answer-option bg-green-500 hover:bg-green-600 text-white p-6 rounded-xl shadow-lg"
-              data-color="green">
+              data-color="green" role="listitem" aria-label="Option D">
               <div class="flex items-center gap-4">
                 <span
                   class="text-3xl font-bold bg-white/20 w-12 h-12 flex items-center justify-center rounded-lg">D</span>
