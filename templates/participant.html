@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -289,18 +289,18 @@
 
         <!-- Answer Buttons Grid -->
         <div class="grid grid-cols-2 gap-4">
-          <button class="answer-btn bg-red-500 hover:bg-red-600 text-white p-8 rounded-xl shadow-lg" data-answer="0">
+          <button class="answer-btn bg-red-500 hover:bg-red-600 text-white p-8 rounded-xl shadow-lg" data-answer="0" aria-label="Answer A">
             <span class="text-5xl font-bold">A</span>
           </button>
-          <button class="answer-btn bg-blue-500 hover:bg-blue-600 text-white p-8 rounded-xl shadow-lg" data-answer="1">
+          <button class="answer-btn bg-blue-500 hover:bg-blue-600 text-white p-8 rounded-xl shadow-lg" data-answer="1" aria-label="Answer B">
             <span class="text-5xl font-bold">B</span>
           </button>
           <button class="answer-btn bg-yellow-500 hover:bg-yellow-600 text-white p-8 rounded-xl shadow-lg"
-            data-answer="2">
+            data-answer="2" aria-label="Answer C">
             <span class="text-5xl font-bold">C</span>
           </button>
           <button class="answer-btn bg-green-500 hover:bg-green-600 text-white p-8 rounded-xl shadow-lg"
-            data-answer="3">
+            data-answer="3" aria-label="Answer D">
             <span class="text-5xl font-bold">D</span>
           </button>
         </div>
@@ -385,6 +385,7 @@
   </div>
 
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
   <script src="{{ url_for('static', filename='js/participant.js') }}"></script>
 </body>
 
