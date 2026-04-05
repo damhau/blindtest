@@ -17,7 +17,7 @@ There is no test suite, linter, or CI pipeline. The `tests/` directory contains 
 
 ## Architecture
 
-**Backend:** Single Flask app (`app.py`) with Socket.IO for real-time multiplayer. Uses eventlet async mode. All game state is in-memory (no database).
+**Backend:** Single Flask app (`app.py`) with Socket.IO for real-time multiplayer. Uses eventlet async mode. Game state is in-memory; leaderboard data persists to JSON files.
 
 **Frontend:** Server-rendered Jinja2 templates with vanilla JS and Tailwind CSS (CDN). No build step.
 
@@ -27,6 +27,8 @@ There is no test suite, linter, or CI pipeline. The `tests/` directory contains 
 - `libs/spotify_service.py` — Spotify Client Credentials wrapper (public playlists only)
 - `libs/spotify_oauth_service.py` — Spotify OAuth flow (private playlists, Web Playback SDK, Spotify Connect)
 - `libs/openai_service.py` — Fake artist name generation with MusicBrainz fallback
+- `libs/leaderboard_service.py` — Per-host JSON file leaderboard (one file per Spotify user ID)
+- `templates/leaderboard.html` — Standalone leaderboard page with rankings and game history
 - `static/js/host.js` — Host-side game logic, Spotify Web Playback SDK integration
 - `static/js/participant.js` — Player-side UI and answer submission
 - `static/js/utils.js` — Shared utilities (avatars via DiceBear, toast notifications, connection overlays)
@@ -51,4 +53,14 @@ Rank-based + time-based + song progression multiplier. The formula is in `app.py
 
 ## Configuration
 
-Copy `.env.example` to `.env` with: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, `OPENAI_API_KEY`, `SECRET_KEY`.
+Copy `.env.example` to `.env` with: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, `OPENAI_API_KEY`, `SECRET_KEY`. Optional: `LEADERBOARD_DATA_DIR` (defaults to `/data`).
+
+## Important patterns
+
+- **`style.css` is NOT loaded in `host.html`** — host page uses only inline `<style>` block and Tailwind CDN. Fullscreen styles must go in the inline block.
+- **Templates are not shared** — nav bar, settings modal, profile/auth logic are duplicated across `index.html`, `host.html`, `participant.html`, and `leaderboard.html`. Changes must be applied to each.
+- **iOS Safari quirks** — `user-scalable=no` viewport is ignored since iOS 10. Pinch zoom prevention requires JS `gesturestart`/`gesturechange` events with `{ passive: false }`. Wake Lock API requires a user gesture to acquire (call from a click/tap handler, not from socket events).
+- **Timer architecture** — the host's 15s client timer is the primary driver. The server runs a 30s fallback timer. Host sends `host_timer_expired` when countdown reaches 0.
+- **Eventlet threading** — `threading.Lock` works under eventlet monkey-patching but can deadlock in background tasks. Prefer lock-free patterns or keep locks minimal.
+- **Settings** — stored server-side via `POST /api/user/settings` (Flask session). Both `host.html` and `index.html` have settings modals that must stay in sync.
+- **Player identity** — participants are tracked across sessions via a `blindtest_player_id` cookie (UUID, 1 year expiry). Leaderboard uses most recently used name as display name.
