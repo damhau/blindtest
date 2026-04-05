@@ -175,10 +175,17 @@ joinRoomBtn.addEventListener('click', () => {
 });
 
 // Answer Buttons — use pointerdown for instant mobile response (no 300ms click delay)
+// Note: e.preventDefault() is NOT called here because it suppresses the Vibration API
+// on Android. Scroll/zoom prevention is handled by CSS touch-action: none on #gameScreen.
 answerButtons.forEach(btn => {
   btn.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
     if (hasAnswered) return;
+
+    // Haptic feedback FIRST — must fire before any preventDefault or state changes
+    // that could interfere with the vibration pipeline on Android
+    if (navigator.vibrate && vibrationEnabled) {
+      navigator.vibrate(50);
+    }
 
     const answer = parseInt(btn.dataset.answer);
     hasAnswered = true;
@@ -187,11 +194,6 @@ answerButtons.forEach(btn => {
     // Visual feedback
     answerButtons.forEach(b => b.disabled = true);
     btn.classList.add('selected');
-
-    // Haptic feedback (Android via Vibration API, controlled by host setting)
-    if (navigator.vibrate && vibrationEnabled) {
-      navigator.vibrate(50);
-    }
 
     // Calculate client-side response time
     const clientResponseTimeMs = questionStartTime ? Date.now() - questionStartTime : null;
