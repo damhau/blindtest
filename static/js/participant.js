@@ -13,17 +13,37 @@ let readyForNextTimer = null;
 let gamesInSeries = 1;
 let currentGameNumber = 1;
 let questionStartTime = null; // Track when question started on client
+let vibrationEnabled = true; // Set by host via game_started event
+
+// Prevent pinch-to-zoom on iOS Safari (viewport meta is ignored since iOS 10).
+// gesturestart/gesturechange are Safari-proprietary events — { passive: false } is required
+// or preventDefault() is silently ignored.
+document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('gestureend', (e) => e.preventDefault(), { passive: false });
+// Belt-and-suspenders: also block multi-touch touchmove (pinch = 2+ fingers)
+document.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
 
 // Wake Lock to prevent screen auto-lock during game
 let wakeLock = null;
 async function requestWakeLock() {
   try {
     wakeLock = await navigator.wakeLock.request('screen');
-  } catch (e) { /* browser doesn't support it */ }
+  } catch (e) { /* not supported or denied */ }
 }
 function releaseWakeLock() {
   if (wakeLock) { wakeLock.release(); wakeLock = null; }
 }
+window.addEventListener('beforeunload', releaseWakeLock);
+
+// Re-acquire wake lock when page becomes visible again (iOS releases it on tab switch)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wakeLock === null) {
+    requestWakeLock();
+  }
+});
 
 // Persistent player identity for leaderboard tracking
 function getPlayerId() {
@@ -157,8 +177,10 @@ answerButtons.forEach(btn => {
     answerButtons.forEach(b => b.disabled = true);
     btn.classList.add('selected');
 
-    // Haptic feedback on supported devices
-    if (navigator.vibrate) navigator.vibrate(50);
+    // Haptic feedback (Android via Vibration API, controlled by host setting)
+    if (navigator.vibrate && vibrationEnabled) {
+      navigator.vibrate(50);
+    }
 
     // Calculate client-side response time
     const clientResponseTimeMs = questionStartTime ? Date.now() - questionStartTime : null;
@@ -291,6 +313,13 @@ socket.on('participant_left', (data) => {
 
 socket.on('game_started', (data) => {
   requestWakeLock();
+  vibrationEnabled = data.vibration_enabled !== false;
+
+  // Hide nav bar to maximize screen space for answers
+  const nav = document.getElementById('participantNav');
+  if (nav) nav.style.display = 'none';
+  // Scroll to top so game screen is fully visible
+  window.scrollTo(0, 0);
 
   // Remove mid-game waiting overlay if present
   const waitingOverlay = document.getElementById('midGameWaitingOverlay');
@@ -444,6 +473,8 @@ socket.on('question_timeout', () => {
 
 socket.on('game_ended', (data) => {
   releaseWakeLock();
+  const nav = document.getElementById('participantNav');
+  if (nav) nav.style.display = '';
   // For single games or when intermediate game ends in a series
   // In series, this goes to host only (not participants)
   if (data.final_scores) {
@@ -454,6 +485,8 @@ socket.on('game_ended', (data) => {
 
 socket.on('series_ended', (data) => {
   releaseWakeLock();
+  const nav = document.getElementById('participantNav');
+  if (nav) nav.style.display = '';
   // When entire series ends, show final scores to participants
   displayFinalScores(data.final_scores);
   showScreen(endScreen);

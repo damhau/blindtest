@@ -605,6 +605,8 @@ def user_settings():
                 "theme": "light",
                 "sound_effects": True,
                 "notifications": True,
+                "vibration_enabled": True,
+                "auto_fullscreen": False,
                 "default_game_length": 10,
                 "difficulty_preference": "medium",
                 "show_leaderboard": True,
@@ -1070,6 +1072,7 @@ def handle_start_game(data):
     pin = data.get("pin")
     song_count = data.get("song_count", 10)  # Default to 10 if not provided
     games_count = data.get("games_count", 1)  # Default to 1 game
+    vibration_enabled = data.get("vibration_enabled", True)
 
     # Validate counts
     song_count = max(1, min(30, song_count))  # Clamp between 1 and 30
@@ -1082,6 +1085,7 @@ def handle_start_game(data):
         return
 
     room = rooms[pin]
+    room.vibration_enabled = vibration_enabled
 
     if room.host_sid != request.sid:
         emit("error", {"message": "Only host can start the game"})
@@ -1957,6 +1961,7 @@ def handle_start_game(data):
             "has_oauth": room.token_info is not None,
             "games_in_series": games_count,
             "current_game": 1,
+            "vibration_enabled": room.vibration_enabled,
         },
         room=pin,
     )
@@ -2282,6 +2287,7 @@ def handle_start_next_game(data):
             "has_oauth": room.token_info is not None,
             "games_in_series": room.games_in_series,
             "current_game": room.current_game_number,
+            "vibration_enabled": getattr(room, 'vibration_enabled', True),
         },
         room=pin,
     )
@@ -2437,13 +2443,15 @@ def handle_end_game(data):
 
 
 def cleanup_disconnected_participants():
-    """Background task to remove participants and rooms who haven't reconnected after grace period"""
-    GRACE_PERIOD = 30  # seconds
+    """Background task to remove stale participants, rooms, and tokens"""
+    GRACE_PERIOD = 30  # seconds for participant/host reconnection
+    ROOM_IDLE_TTL = 3600  # 1 hour - delete ended/idle rooms
 
     while True:
         socketio.sleep(5)  # Check every 5 seconds
 
         current_time = time.time()
+        now = datetime.now()
         rooms_to_check = list(
             rooms.items()
         )  # Create a copy to avoid dict size change during iteration
@@ -2464,6 +2472,22 @@ def cleanup_disconnected_participants():
                     rooms_to_delete.append(pin)
                     continue  # Skip participant cleanup for this room
 
+            # Clean up idle/ended rooms after TTL
+            room_age = (now - room.created_at).total_seconds()
+            if room.state == "ended" and room_age > ROOM_IDLE_TTL:
+                logger.info(f"Removing room {pin} - ended and idle for >{ROOM_IDLE_TTL}s")
+                rooms_to_delete.append(pin)
+                continue
+
+            # Also clean up very old rooms regardless of state (e.g. abandoned)
+            if room_age > ROOM_IDLE_TTL * 3:  # 3 hours absolute max
+                logger.info(f"Removing room {pin} - exceeded max lifetime ({room_age:.0f}s)")
+                socketio.emit(
+                    "room_closed", {"message": "Room expired due to inactivity."}, room=pin
+                )
+                rooms_to_delete.append(pin)
+                continue
+
             # Check for disconnected participants
             sids_to_remove = []
 
@@ -2482,6 +2506,10 @@ def cleanup_disconnected_participants():
             for sid in sids_to_remove:
                 room.remove_participant(sid)
 
+                # Clean up stale player/token entries
+                players.pop(sid, None)
+                spotify_tokens.pop(sid, None)
+
                 # Notify others
                 socketio.emit(
                     "participant_left",
@@ -2489,9 +2517,16 @@ def cleanup_disconnected_participants():
                     room=pin,
                 )
 
-        # Delete rooms with expired host disconnections
+        # Delete rooms and clean up associated player/token entries
         for pin in rooms_to_delete:
             if pin in rooms:
+                room = rooms[pin]
+                # Clean up player and token entries for all participants in this room
+                for sid in list(room.participants.keys()):
+                    players.pop(sid, None)
+                    spotify_tokens.pop(sid, None)
+                players.pop(room.host_sid, None)
+                spotify_tokens.pop(room.host_sid, None)
                 del rooms[pin]
 
 

@@ -944,7 +944,8 @@ startGameBtn.addEventListener('click', () => {
     progressContainer.classList.remove('hidden');
   }
 
-  socket.emit('start_game', { pin: currentPin, song_count: songCount, games_count: gamesCount });
+  const vibEnabled = userSettings ? userSettings.vibration_enabled !== false : true;
+  socket.emit('start_game', { pin: currentPin, song_count: songCount, games_count: gamesCount, vibration_enabled: vibEnabled });
 });
 
 // Next Song (button currently commented out in HTML)
@@ -1035,7 +1036,7 @@ socket.on('token_refreshed', (data) => {
 
 socket.on('game_started', (data) => {
   // Auto-fullscreen if setting is enabled
-  if (localStorage.getItem('autoFullscreen') === 'true' && !document.fullscreenElement) {
+  if (userSettings && userSettings.auto_fullscreen && !document.fullscreenElement) {
     document.documentElement.requestFullscreen().catch(() => {});
   }
 
@@ -1187,24 +1188,28 @@ socket.on('show_intermediate_scores', (data) => {
     // Notify server that standings are displayed
     socket.emit('standings_displayed', { pin: currentPin });
 
-    // Start countdown timer (5, 4, 3, 2, 1)
     const countdownTimer = standingsModal.querySelector('#countdownTimer');
-    if (countdownTimer) {
-      let countdown = 3;
-      countdownTimer.textContent = countdown;
+    if (data.is_last_question) {
+      // Last question — no countdown, server will send game_ended/series_ended
+      if (countdownTimer) countdownTimer.textContent = '';
+    } else {
+      // Start countdown timer (3, 2, 1, EJECT!)
+      if (countdownTimer) {
+        let countdown = 3;
+        countdownTimer.textContent = countdown;
 
-      const countdownInterval = setInterval(() => {
-        countdown--;
-        if (countdown > 0) {
-          countdownTimer.textContent = countdown;
-        } else {
-          clearInterval(countdownInterval);
-          countdownTimer.textContent = 'EJECT!';
-        }
-      }, 1000); // Update every second
+        const countdownInterval = setInterval(() => {
+          countdown--;
+          if (countdown > 0) {
+            countdownTimer.textContent = countdown;
+          } else {
+            clearInterval(countdownInterval);
+            countdownTimer.textContent = 'EJECT!';
+          }
+        }, 1000);
 
-      // Store interval ID for cleanup
-      countdownTimer.dataset.intervalId = countdownInterval;
+        countdownTimer.dataset.intervalId = countdownInterval;
+      }
     }
   }
 });
@@ -2151,16 +2156,20 @@ function openSettingsModal() {
     const theme = document.getElementById('settingTheme');
 
     const autoFullscreen = document.getElementById('settingAutoFullscreen');
-    if (autoFullscreen) autoFullscreen.checked = localStorage.getItem('autoFullscreen') === 'true';
+    const vibration = document.getElementById('settingVibration');
 
     if (userSettings) {
       if (gameLength) gameLength.value = userSettings.default_game_length || 10;
       if (soundEffects) soundEffects.checked = userSettings.sound_effects !== false;
       if (notifications) notifications.checked = userSettings.notifications !== false;
       if (theme) theme.value = userSettings.theme || localStorage.getItem('theme') || 'light';
+      if (vibration) vibration.checked = userSettings.vibration_enabled !== false;
+      if (autoFullscreen) autoFullscreen.checked = userSettings.auto_fullscreen === true;
     } else {
       // Load from localStorage if no server settings
       if (theme) theme.value = localStorage.getItem('theme') || 'light';
+      if (vibration) vibration.checked = true;
+      if (autoFullscreen) autoFullscreen.checked = false;
     }
   }
 }
@@ -2192,13 +2201,15 @@ async function saveSettings() {
   const theme = document.getElementById('settingTheme');
 
   const autoFullscreen = document.getElementById('settingAutoFullscreen');
-  if (autoFullscreen) localStorage.setItem('autoFullscreen', autoFullscreen.checked);
+  const vibration = document.getElementById('settingVibration');
 
   const settings = {
     default_game_length: gameLength ? parseInt(gameLength.value) : 10,
     sound_effects: soundEffects ? soundEffects.checked : true,
     notifications: notifications ? notifications.checked : true,
-    theme: theme ? theme.value : 'light'
+    theme: theme ? theme.value : 'light',
+    vibration_enabled: vibration ? vibration.checked : true,
+    auto_fullscreen: autoFullscreen ? autoFullscreen.checked : false,
   };
 
   // Always apply settings immediately (don't wait for server)

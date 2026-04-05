@@ -99,9 +99,21 @@
       }
     }
 
-    /* Prevent zoom on double tap */
+    /* Prevent zoom on double tap (all screens) */
     * {
       touch-action: manipulation;
+    }
+
+    /* Prevent all touch gestures on the game screen (no scrolling needed there) */
+    #gameScreen {
+      touch-action: none;
+    }
+
+    /* Prevent iOS text selection and callout on long press */
+    .answer-btn {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
     }
 
     /* Loading overlay */
@@ -162,7 +174,7 @@
 
 <body class="min-h-screen" style="background-color: #fefdfe;">
   <!-- Top Navigation -->
-  <nav class="bg-white border-b border-gray-200 px-6 py-4">
+  <nav id="participantNav" class="bg-white border-b border-gray-200 px-6 py-4">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <!-- Left: Logo -->
       <div class="flex items-center gap-3">
