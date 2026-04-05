@@ -1067,17 +1067,11 @@ socket.on('game_started', (data) => {
   currentGameNumber = data.current_game || 1;
 
   // Update header if multiple games
-  if (gamesInSeries > 1) {
-    const gameHeader = document.querySelector('#gameScreen .bg-white.rounded-2xl.shadow-lg.p-6.mb-6');
-    if (gameHeader && !document.getElementById('seriesInfo')) {
-      const seriesInfo = document.createElement('div');
-      seriesInfo.id = 'seriesInfo';
-      seriesInfo.className = 'text-center mb-2';
-      seriesInfo.innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
-      gameHeader.insertBefore(seriesInfo, gameHeader.firstChild);
-    } else if (document.getElementById('seriesInfo')) {
-      document.getElementById('seriesInfo').innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
-    }
+  const gameHeaderLeft = document.getElementById('gameHeaderLeft');
+  if (gamesInSeries > 1 && gameHeaderLeft) {
+    gameHeaderLeft.innerHTML = `<span class="text-sm font-semibold text-purple-600">Game ${currentGameNumber} of ${gamesInSeries}</span>`;
+  } else if (gameHeaderLeft) {
+    gameHeaderLeft.innerHTML = '';
   }
 
   // Generate compact QR code for game screen

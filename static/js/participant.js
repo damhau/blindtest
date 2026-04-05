@@ -28,10 +28,13 @@ document.addEventListener('touchmove', (e) => {
 
 // Wake Lock to prevent screen auto-lock during game
 let wakeLock = null;
-async function requestWakeLock() {
+async function requestWakeLock(source) {
   try {
     wakeLock = await navigator.wakeLock.request('screen');
-  } catch (e) { /* not supported or denied */ }
+    showToast('Wake lock OK from: ' + source);
+  } catch (e) {
+    showToast('Wake lock FAIL from ' + source + ': ' + e.name);
+  }
 }
 function releaseWakeLock() {
   if (wakeLock) { wakeLock.release(); wakeLock = null; }
@@ -39,9 +42,14 @@ function releaseWakeLock() {
 window.addEventListener('beforeunload', releaseWakeLock);
 
 // Re-acquire wake lock when page becomes visible again (iOS releases it on tab switch)
-document.addEventListener('visibilitychange', () => {
+document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && wakeLock === null) {
-    requestWakeLock();
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      showToast('Wake lock OK from: visibility-change');
+    } catch (e) {
+      showToast('Wake lock FAIL from visibility-change: ' + e.name);
+    }
   }
 });
 
@@ -150,6 +158,9 @@ joinRoomBtn.addEventListener('click', () => {
     return;
   }
 
+  // Acquire wake lock now (during user gesture) so it's ready when game starts
+  requestWakeLock('join-tap');
+
   currentName = name;
   currentPin = pin;
 
@@ -215,7 +226,11 @@ socket.on('room_joined', (data) => {
   if (data.mid_game) {
     console.log('Joined mid-game, waiting for next question');
 
-    // Show game screen with waiting state
+    // Hide nav bar and show game screen
+    const nav = document.getElementById('participantNav');
+    if (nav) nav.style.display = 'none';
+    window.scrollTo(0, 0);
+    requestWakeLock('mid-game-join');
     showScreen(gameScreen);
 
     // Update player name in game screen
@@ -312,7 +327,6 @@ socket.on('participant_left', (data) => {
 });
 
 socket.on('game_started', (data) => {
-  requestWakeLock();
   vibrationEnabled = data.vibration_enabled !== false;
 
   // Hide nav bar to maximize screen space for answers
