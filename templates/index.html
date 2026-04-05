@@ -69,7 +69,7 @@
 
       <!-- Right: Actions -->
       <div class="flex items-center gap-2 sm:gap-4">
-        <button
+        <a href="/leaderboard"
           class="hidden md:flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
           <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
             <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
@@ -78,7 +78,7 @@
               clip-rule="evenodd" />
           </svg>
           <span class="font-semibold text-sm">Leaderboard</span>
-        </button>
+        </a>
         <button
           class="hidden md:flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
           <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
@@ -90,7 +90,7 @@
         <div id="userProfile" class="hidden relative">
           <button id="userMenuButton"
             class="w-10 h-10 rounded-full bg-gray-200 hover:bg-gray-300 transition flex items-center justify-center cursor-pointer">
-            <img id="userAvatar" class="w-10 h-10 rounded-full" src="" alt="User">
+            <img id="userAvatar" class="w-10 h-10 rounded-full" src="" alt="">
           </button>
           <div id="userMenu"
             class="hidden absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
@@ -245,15 +245,30 @@
   </div>
 
   <script>
-    // Check auth and display user profile if logged in
+    // Restore cached avatar instantly
+    (function() {
+      const cached = localStorage.getItem('cachedAvatarUrl');
+      if (cached) {
+        const img = document.getElementById('userAvatar');
+        if (img) img.src = cached;
+        const p = document.getElementById('userProfile');
+        if (p) { p.classList.remove('hidden'); p.classList.add('block'); }
+        const l = document.getElementById('loginButton');
+        if (l) l.classList.add('hidden');
+      }
+    })();
+
+    // Check auth and verify
     fetch('/check_auth')
       .then(res => res.json())
       .then(data => {
         if (data.authenticated) {
-          document.getElementById('userProfile').classList.remove('hidden');
-          document.getElementById('userProfile').classList.add('block');
           document.getElementById('loginButton').classList.add('hidden');
         } else {
+          localStorage.removeItem('cachedAvatarUrl');
+          localStorage.removeItem('cachedUserProfile');
+          const p = document.getElementById('userProfile');
+          if (p) { p.classList.add('hidden'); p.classList.remove('block'); }
           document.getElementById('loginButton').classList.remove('hidden');
           document.getElementById('loginButton').classList.add('flex');
         }
@@ -266,11 +281,21 @@
 
     // Load user profile
     async function loadUserProfile() {
+      // Use cached profile immediately if available
+      const cached = localStorage.getItem('cachedUserProfile');
+      if (cached) {
+        try {
+          userProfile = JSON.parse(cached);
+          await updateProfileUI(userProfile);
+        } catch (e) {}
+      }
+
+      // Fetch fresh profile in background
       try {
         const response = await fetch('/api/user/profile');
-
         if (response.ok) {
           userProfile = await response.json();
+          localStorage.setItem('cachedUserProfile', JSON.stringify(userProfile));
           await updateProfileUI(userProfile);
         }
       } catch (error) {
@@ -303,20 +328,19 @@
     }
 
     async function updateProfileUI(profile) {
-      // Update avatar images
       const displayName = profile.display_name || 'User';
       const userAvatar = document.getElementById('userAvatar');
       const menuAvatar = document.getElementById('menuAvatar');
 
-      if (profile.profile_image) {
-        if (userAvatar) userAvatar.src = profile.profile_image;
-        if (menuAvatar) menuAvatar.src = profile.profile_image;
-      } else {
-        // Use cached DiceBear avatar for menu (faster loading)
-        const cachedAvatarUrl = await getCachedAvatar(displayName);
-        if (userAvatar) userAvatar.src = cachedAvatarUrl;
-        if (menuAvatar) menuAvatar.src = cachedAvatarUrl;
-      }
+      const avatarUrl = profile.profile_image || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=667eea&fontSize=40`;
+      localStorage.setItem('cachedAvatarUrl', avatarUrl);
+
+      if (userAvatar) userAvatar.src = avatarUrl;
+      if (menuAvatar) menuAvatar.src = avatarUrl;
+
+      // Show profile button
+      const userProfileEl = document.getElementById('userProfile');
+      if (userProfileEl) { userProfileEl.classList.remove('hidden'); userProfileEl.classList.add('block'); }
 
       // Update display name
       const menuUserName = document.getElementById('menuUserName');
@@ -381,6 +405,21 @@
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
+      }
+    }
+
+    async function clearLeaderboard() {
+      if (!confirm('Are you sure you want to clear the entire leaderboard? This cannot be undone.')) return;
+      try {
+        const res = await fetch('/api/leaderboard', { method: 'DELETE' });
+        if (res.ok) {
+          alert('Leaderboard cleared');
+          closeSettingsModal();
+        } else {
+          alert('Failed to clear leaderboard');
+        }
+      } catch (err) {
+        alert('Failed to clear leaderboard');
       }
     }
 
@@ -557,6 +596,12 @@
               class="w-full px-4 py-3 border border-red-300 rounded-lg hover:bg-red-50 text-left text-red-600">
               <p class="font-medium">Logout from Spotify</p>
               <p class="text-sm">You'll need to login again</p>
+            </button>
+
+            <button onclick="clearLeaderboard()"
+              class="w-full px-4 py-3 border border-orange-300 rounded-lg hover:bg-orange-50 text-left text-orange-600">
+              <p class="font-medium">Clear Leaderboard</p>
+              <p class="text-sm">Delete all game history and player rankings</p>
             </button>
           </div>
         </div>

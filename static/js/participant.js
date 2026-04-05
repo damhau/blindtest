@@ -14,6 +14,28 @@ let gamesInSeries = 1;
 let currentGameNumber = 1;
 let questionStartTime = null; // Track when question started on client
 
+// Wake Lock to prevent screen auto-lock during game
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (e) { /* browser doesn't support it */ }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
+
+// Persistent player identity for leaderboard tracking
+function getPlayerId() {
+  let id = getCookie('blindtest_player_id');
+  if (!id) {
+    id = crypto.randomUUID ? crypto.randomUUID() : 'p-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    setCookie('blindtest_player_id', id, 365);
+  }
+  return id;
+}
+const playerId = getPlayerId();
+
 // Connection resilience tracking
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -118,34 +140,33 @@ joinRoomBtn.addEventListener('click', () => {
   showLoading('Joining Game', `Connecting to room ${pin}...`);
   joinRoomBtn.disabled = true;
 
-  socket.emit('join_room', { name, pin });
+  socket.emit('join_room', { name, pin, player_id: playerId });
 });
 
-// Answer Buttons
+// Answer Buttons — use pointerdown for instant mobile response (no 300ms click delay)
 answerButtons.forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
     if (hasAnswered) return;
 
     const answer = parseInt(btn.dataset.answer);
-
-    // Disable all buttons
-    answerButtons.forEach(b => b.disabled = true);
-    btn.classList.add('selected');
-
     hasAnswered = true;
     selectedAnswer = answer;
 
-    // Calculate client-side response time
-    const answerTime = Date.now();
-    const clientResponseTimeMs = questionStartTime ? answerTime - questionStartTime : null;
+    // Visual feedback
+    answerButtons.forEach(b => b.disabled = true);
+    btn.classList.add('selected');
 
-    // Send answer with both client timestamp and response time
-    const clientTimestamp = new Date().toISOString();
+    // Haptic feedback on supported devices
+    if (navigator.vibrate) navigator.vibrate(50);
+
+    // Calculate client-side response time
+    const clientResponseTimeMs = questionStartTime ? Date.now() - questionStartTime : null;
 
     socket.emit('submit_answer', {
       pin: currentPin,
       answer: answer,
-      client_timestamp: clientTimestamp,
+      client_timestamp: new Date().toISOString(),
       client_response_time_ms: clientResponseTimeMs
     });
   });
@@ -269,6 +290,8 @@ socket.on('participant_left', (data) => {
 });
 
 socket.on('game_started', (data) => {
+  requestWakeLock();
+
   // Remove mid-game waiting overlay if present
   const waitingOverlay = document.getElementById('midGameWaitingOverlay');
   if (waitingOverlay) {
@@ -420,6 +443,7 @@ socket.on('question_timeout', () => {
 });
 
 socket.on('game_ended', (data) => {
+  releaseWakeLock();
   // For single games or when intermediate game ends in a series
   // In series, this goes to host only (not participants)
   if (data.final_scores) {
@@ -429,6 +453,7 @@ socket.on('game_ended', (data) => {
 });
 
 socket.on('series_ended', (data) => {
+  releaseWakeLock();
   // When entire series ends, show final scores to participants
   displayFinalScores(data.final_scores);
   showScreen(endScreen);

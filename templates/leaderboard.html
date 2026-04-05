@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaderboard - MusicQuiz Blindtest</title>
+  <link rel="icon" type="image/x-icon" href="/static/assets/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#667eea',
+            secondary: '#764ba2',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Poppins', sans-serif; }
+  </style>
+</head>
+
+<body class="min-h-screen" style="background-color: #fefdfe;">
+  <!-- Top Navigation -->
+  <nav class="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-2 sm:gap-3">
+        <a href="/" class="flex items-center gap-2 sm:gap-3">
+          <img src="/static/assets/logo.png" alt="BlindTest Logo" class="h-8 sm:h-10">
+          <div class="flex items-baseline gap-1 sm:gap-2">
+            <span class="text-lg sm:text-xl font-bold text-gray-800">MusicQuiz</span>
+            <span class="text-xs sm:text-sm text-gray-500 font-medium">Blindtest</span>
+          </div>
+        </a>
+      </div>
+      <a href="/"
+        class="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+        </svg>
+        <span class="font-semibold text-sm">Back</span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <h1 class="text-4xl font-bold text-gray-800 mb-2">Leaderboard</h1>
+      <p class="text-gray-500">All-time rankings and game history</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex justify-center gap-2 mb-8">
+      <button onclick="showTab('rankings')" id="tabRankings"
+        class="px-6 py-2.5 rounded-xl text-sm font-semibold transition bg-indigo-600 text-white">Rankings</button>
+      <button onclick="showTab('history')" id="tabHistory"
+        class="px-6 py-2.5 rounded-xl text-sm font-semibold transition bg-gray-100 text-gray-700 hover:bg-gray-200">Game History</button>
+    </div>
+
+    <!-- Not Authenticated -->
+    <div id="notAuthenticated" class="hidden text-center py-12">
+      <p class="text-gray-500 text-lg mb-4">Log in with Spotify to see your leaderboard</p>
+      <a href="/login"
+        class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-xl transition">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+        </svg>
+        Login with Spotify
+      </a>
+    </div>
+
+    <!-- Rankings Tab -->
+    <div id="rankingsTab">
+      <div id="rankingsLoading" class="text-center py-12 text-gray-500">Loading...</div>
+      <div id="rankingsEmpty" class="hidden text-center py-12">
+        <div class="text-6xl mb-4">🏆</div>
+        <p class="text-gray-500 text-lg">No games played yet</p>
+        <p class="text-gray-400 text-sm mt-2">Play a game to see the leaderboard!</p>
+        <a href="/host" class="inline-block mt-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-3 rounded-xl transition">Host a Game</a>
+      </div>
+      <div id="rankingsContent" class="hidden">
+        <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <table class="w-full">
+            <thead>
+              <tr class="text-left text-sm text-gray-500 bg-gray-50">
+                <th class="py-4 pl-6">#</th>
+                <th class="py-4">Player</th>
+                <th class="py-4 text-right">Games</th>
+                <th class="py-4 text-right">Wins</th>
+                <th class="py-4 text-right">Total Score</th>
+                <th class="py-4 text-right">Accuracy</th>
+                <th class="py-4 text-right pr-6">Avg Response</th>
+              </tr>
+            </thead>
+            <tbody id="rankingsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- History Tab -->
+    <div id="historyTab" class="hidden">
+      <div id="historyLoading" class="text-center py-12 text-gray-500">Loading...</div>
+      <div id="historyEmpty" class="hidden text-center py-12">
+        <div class="text-6xl mb-4">📋</div>
+        <p class="text-gray-500 text-lg">No game history yet</p>
+      </div>
+      <div id="historyContent" class="hidden space-y-4"></div>
+    </div>
+  </div>
+
+  <script>
+    let isAuthenticated = false;
+
+    function showTab(tab) {
+      document.getElementById('rankingsTab').classList.toggle('hidden', tab !== 'rankings');
+      document.getElementById('historyTab').classList.toggle('hidden', tab !== 'history');
+
+      const tabRankings = document.getElementById('tabRankings');
+      const tabHistory = document.getElementById('tabHistory');
+      if (tab === 'rankings') {
+        tabRankings.className = 'px-6 py-2.5 rounded-xl text-sm font-semibold transition bg-indigo-600 text-white';
+        tabHistory.className = 'px-6 py-2.5 rounded-xl text-sm font-semibold transition bg-gray-100 text-gray-700 hover:bg-gray-200';
+        loadRankings();
+      } else {
+        tabHistory.className = 'px-6 py-2.5 rounded-xl text-sm font-semibold transition bg-indigo-600 text-white';
+        tabRankings.className = 'px-6 py-2.5 rounded-xl text-sm font-semibold transition bg-gray-100 text-gray-700 hover:bg-gray-200';
+        loadHistory();
+      }
+    }
+
+    async function loadRankings() {
+      const loading = document.getElementById('rankingsLoading');
+      const empty = document.getElementById('rankingsEmpty');
+      const content = document.getElementById('rankingsContent');
+      const body = document.getElementById('rankingsBody');
+
+      loading.classList.remove('hidden');
+      empty.classList.add('hidden');
+      content.classList.add('hidden');
+
+      try {
+        const res = await fetch('/api/leaderboard');
+        if (res.status === 401) { showNotAuth(); return; }
+        const data = await res.json();
+        loading.classList.add('hidden');
+
+        if (!data.players || data.players.length === 0) {
+          empty.classList.remove('hidden');
+          return;
+        }
+
+        body.innerHTML = '';
+        data.players.forEach((player, i) => {
+          const rank = i + 1;
+          const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank;
+          const accuracy = player.total_answers > 0
+            ? Math.round((player.correct_answers / player.total_answers) * 100) + '%'
+            : '-';
+          const avgMs = player.avg_response_ms ? (player.avg_response_ms / 1000).toFixed(1) + 's' : '-';
+          const rowClass = rank <= 3 ? 'font-semibold' : '';
+
+          const tr = document.createElement('tr');
+          tr.className = `border-t border-gray-100 hover:bg-gray-50 ${rowClass}`;
+          tr.innerHTML = `
+            <td class="py-4 pl-6 text-lg">${medal}</td>
+            <td class="py-4 text-gray-800">${player.display_name}</td>
+            <td class="py-4 text-right text-gray-600">${player.games_played}</td>
+            <td class="py-4 text-right text-gray-600">${player.wins}</td>
+            <td class="py-4 text-right font-bold text-indigo-600">${player.total_score}</td>
+            <td class="py-4 text-right text-gray-600">${accuracy}</td>
+            <td class="py-4 text-right pr-6 text-gray-600">${avgMs}</td>
+          `;
+          body.appendChild(tr);
+        });
+        content.classList.remove('hidden');
+      } catch (err) {
+        loading.classList.add('hidden');
+        empty.classList.remove('hidden');
+        console.error('Failed to load leaderboard:', err);
+      }
+    }
+
+    async function loadHistory() {
+      const loading = document.getElementById('historyLoading');
+      const empty = document.getElementById('historyEmpty');
+      const content = document.getElementById('historyContent');
+
+      loading.classList.remove('hidden');
+      empty.classList.add('hidden');
+      content.classList.add('hidden');
+
+      try {
+        const res = await fetch('/api/leaderboard/history');
+        if (res.status === 401) { showNotAuth(); return; }
+        const data = await res.json();
+        loading.classList.add('hidden');
+
+        if (!data.games || data.games.length === 0) {
+          empty.classList.remove('hidden');
+          return;
+        }
+
+        content.innerHTML = '';
+        data.games.forEach(game => {
+          const date = new Date(game.date).toLocaleDateString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+          });
+          const playerList = game.players
+            .sort((a, b) => a.rank - b.rank)
+            .map(p => {
+              const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : `${p.rank}.`;
+              return `<div class="flex items-center gap-2 text-sm">
+                <span>${medal}</span>
+                <span class="font-medium text-gray-800">${p.name}</span>
+                <span class="text-gray-400">${p.score} pts</span>
+              </div>`;
+            }).join('');
+
+          const card = document.createElement('div');
+          card.className = 'bg-white rounded-2xl shadow-lg p-6';
+          card.innerHTML = `
+            <div class="flex justify-between items-start mb-4">
+              <div>
+                <h3 class="font-bold text-gray-800 text-lg">${game.playlist_name}</h3>
+                <p class="text-sm text-gray-500">${game.num_questions} questions</p>
+              </div>
+              <span class="text-sm text-gray-400">${date}</span>
+            </div>
+            <div class="flex flex-wrap gap-4">${playerList}</div>
+          `;
+          content.appendChild(card);
+        });
+        content.classList.remove('hidden');
+      } catch (err) {
+        loading.classList.add('hidden');
+        empty.classList.remove('hidden');
+        console.error('Failed to load history:', err);
+      }
+    }
+
+    function showNotAuth() {
+      document.getElementById('rankingsLoading').classList.add('hidden');
+      document.getElementById('historyLoading').classList.add('hidden');
+      document.getElementById('rankingsTab').classList.add('hidden');
+      document.getElementById('historyTab').classList.add('hidden');
+      document.getElementById('notAuthenticated').classList.remove('hidden');
+    }
+
+    // Initial load
+    fetch('/check_auth')
+      .then(r => r.json())
+      .then(data => {
+        if (data.authenticated) {
+          loadRankings();
+        } else {
+          showNotAuth();
+        }
+      })
+      .catch(() => showNotAuth());
+  </script>
+</body>
+
+</html>

@@ -10,6 +10,28 @@
   }
 })();
 
+// Fullscreen mode
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().then(() => {
+      console.log('Entered fullscreen');
+    }).catch((err) => {
+      console.error('Fullscreen request failed:', err);
+    });
+  } else {
+    document.exitFullscreen().catch((err) => {
+      console.error('Exit fullscreen failed:', err);
+    });
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  const isFs = !!document.fullscreenElement;
+  console.log('Fullscreen changed:', isFs);
+  document.body.classList.toggle('is-fullscreen', isFs);
+});
+
+
 // Force secure WebSocket when using HTTPS
 const socket = io({
   transports: ['websocket', 'polling'],
@@ -368,25 +390,21 @@ async function playTrackOnConnectDevice(trackUri, deviceId) {
     return false;
   }
 
-  const url = deviceId
-    ? `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`
-    : 'https://api.spotify.com/v1/me/player/play';
+  const headers = {
+    'Authorization': `Bearer ${spotifyAccessToken}`,
+    'Content-Type': 'application/json'
+  };
 
   try {
+    const url = `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`;
     const response = await fetch(url, {
       method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${spotifyAccessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        uris: [trackUri]
-      })
+      headers,
+      body: JSON.stringify({ uris: [trackUri] })
     });
 
     if (response.status === 204 || response.status === 202) {
       console.log('✓ Track playing on Connect device:', trackUri);
-      // Notify backend that playback started
       if (currentPin) {
         socket.emit('playback_started', { pin: currentPin });
       }
@@ -399,7 +417,8 @@ async function playTrackOnConnectDevice(trackUri, deviceId) {
       return false;
     }
 
-    console.error('Failed to play on Connect device:', response.status);
+    const errorBody = await response.text();
+    console.error('Failed to play on Connect device:', response.status, errorBody);
     return false;
   } catch (err) {
     console.error('Error playing on Connect device:', err);
@@ -541,6 +560,13 @@ async function loadDeviceList() {
 
     const deviceIcon = getDeviceIcon(device.type);
     const isActive = device.is_active ? '<span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Active</span>' : '';
+    const isRestricted = device.is_restricted ? '<span class="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">Not available</span>' : '';
+
+    if (device.is_restricted) {
+      deviceCard.classList.add('opacity-50');
+      deviceCard.classList.remove('hover:bg-gray-50', 'cursor-pointer');
+      deviceCard.classList.add('cursor-not-allowed');
+    }
 
     deviceCard.innerHTML = `
       <div class="flex items-center gap-4">
@@ -548,14 +574,18 @@ async function loadDeviceList() {
         <div class="flex-1">
           <h4 class="font-semibold text-gray-800 dark:text-gray-200">${device.name}</h4>
           <p class="text-sm text-gray-600 dark:text-gray-400">${device.type} • ${device.volume_percent}% volume</p>
+          ${device.is_restricted ? '<p class="text-xs text-orange-600 mt-1">This device doesn\'t allow remote playback</p>' : ''}
         </div>
         ${isActive}
+        ${isRestricted}
       </div>
     `;
 
-    deviceCard.addEventListener('click', () => {
-      selectDevice(device);
-    });
+    if (!device.is_restricted) {
+      deviceCard.addEventListener('click', () => {
+        selectDevice(device);
+      });
+    }
 
     deviceList.appendChild(deviceCard);
   });
@@ -608,7 +638,7 @@ function disconnectFromDevice() {
   }
 
   // Show notification
-  showNotification('Switched back to Web Playback SDK', 'info');
+  showNotification('Disconnected from device', 'info');
 
   console.log('Disconnected from Connect device, using Web SDK');
 }
@@ -624,8 +654,8 @@ function updateConnectButton() {
       <span>📺 ${selectedConnectDevice.name}</span>
       <button onclick="event.stopPropagation(); disconnectFromDevice();" 
         class="ml-2 px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded transition"
-        title="Switch back to Web SDK">
-        × Use Web SDK
+        title="Disconnect from device">
+        × Disconnect
       </button>
     `;
     connectBtn.classList.add('bg-green-50', 'border', 'border-green-500');
@@ -1004,6 +1034,11 @@ socket.on('token_refreshed', (data) => {
 });
 
 socket.on('game_started', (data) => {
+  // Auto-fullscreen if setting is enabled
+  if (localStorage.getItem('autoFullscreen') === 'true' && !document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+
   // Hide progress bar and reset button
   const progressContainer = document.getElementById('generatingProgress');
   if (progressContainer) {
@@ -1465,16 +1500,27 @@ function displayVotedParticipant(playerName, responseTimeMs) {
     timeDisplay = `<span class="text-xs text-gray-500">${responseTimeMs}ms</span>`;
   }
 
+  const timeValue = (responseTimeMs !== null && responseTimeMs !== undefined) ? responseTimeMs : 999999;
+
   const avatarDiv = document.createElement('div');
   avatarDiv.className = 'flex flex-col items-center gap-1';
   avatarDiv.setAttribute('data-player', playerName);
+  avatarDiv.setAttribute('data-response-time', timeValue);
   avatarDiv.innerHTML = `
     <img src="${avatarUrl}" alt="${playerName}" class="w-12 h-12 rounded-full shadow-md">
     <span class="text-sm text-gray-600 font-medium max-w-[70px] truncate">${playerName}</span>
     ${timeDisplay}
   `;
 
-  votedParticipants.appendChild(avatarDiv);
+  // Insert sorted by response time (fastest first)
+  const insertBefore = Array.from(votedParticipants.children).find(el =>
+    parseFloat(el.getAttribute('data-response-time')) > timeValue
+  );
+  if (insertBefore) {
+    votedParticipants.insertBefore(avatarDiv, insertBefore);
+  } else {
+    votedParticipants.appendChild(avatarDiv);
+  }
 }
 
 function displayCorrectAnswer(correctIndex, correctArtist) {
@@ -1919,6 +1965,10 @@ function startQuestionTimer() {
 
     if (remaining <= 0) {
       stopQuestionTimer();
+      // Notify server that host timer expired
+      if (currentPin) {
+        socket.emit('host_timer_expired', { pin: currentPin });
+      }
     }
   }, 100);
 }
@@ -1975,6 +2025,24 @@ document.addEventListener('keydown', (e) => {
 });
 
 
+// ===== Leaderboard Management =====
+
+async function clearLeaderboard() {
+  if (!confirm('Are you sure you want to clear the entire leaderboard? This cannot be undone.')) return;
+
+  try {
+    const res = await fetch('/api/leaderboard', { method: 'DELETE' });
+    if (res.ok) {
+      showNotification('Leaderboard cleared', 'success');
+      closeSettingsModal();
+    } else {
+      showNotification('Failed to clear leaderboard', 'error');
+    }
+  } catch (err) {
+    showNotification('Failed to clear leaderboard', 'error');
+  }
+}
+
 // ===== Profile and Settings Management =====
 let userProfile = null;
 let userSettings = null;
@@ -1986,11 +2054,21 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadUserProfile() {
+  // Use cached profile immediately if available
+  const cached = localStorage.getItem('cachedUserProfile');
+  if (cached) {
+    try {
+      userProfile = JSON.parse(cached);
+      await updateProfileUI(userProfile);
+    } catch (e) {}
+  }
+
+  // Fetch fresh profile in background
   try {
     const response = await fetch('/api/user/profile');
-
     if (response.ok) {
       userProfile = await response.json();
+      localStorage.setItem('cachedUserProfile', JSON.stringify(userProfile));
       await updateProfileUI(userProfile);
     } else {
       console.log('User not authenticated');
@@ -2006,15 +2084,15 @@ async function updateProfileUI(profile) {
   const userAvatar = document.getElementById('userAvatar');
   const menuAvatar = document.getElementById('menuAvatar');
 
-  if (profile.profile_image) {
-    if (userAvatar) userAvatar.src = profile.profile_image;
-    if (menuAvatar) menuAvatar.src = profile.profile_image;
-  } else {
-    // Use cached DiceBear avatar for menu (faster loading)
-    const cachedAvatarUrl = await getCachedAvatar(displayName);
-    if (userAvatar) userAvatar.src = cachedAvatarUrl;
-    if (menuAvatar) menuAvatar.src = cachedAvatarUrl;
-  }
+  const avatarUrl = profile.profile_image || getAvatarUrlByName(displayName);
+  localStorage.setItem('cachedAvatarUrl', avatarUrl);
+
+  if (userAvatar) userAvatar.src = avatarUrl;
+  if (menuAvatar) menuAvatar.src = avatarUrl;
+
+  // Show profile button
+  const userProfileEl = document.getElementById('userProfile');
+  if (userProfileEl) { userProfileEl.classList.remove('hidden'); userProfileEl.classList.add('block'); }
 
   // Update display name
   const menuUserName = document.getElementById('menuUserName');
@@ -2072,6 +2150,9 @@ function openSettingsModal() {
     const notifications = document.getElementById('settingNotifications');
     const theme = document.getElementById('settingTheme');
 
+    const autoFullscreen = document.getElementById('settingAutoFullscreen');
+    if (autoFullscreen) autoFullscreen.checked = localStorage.getItem('autoFullscreen') === 'true';
+
     if (userSettings) {
       if (gameLength) gameLength.value = userSettings.default_game_length || 10;
       if (soundEffects) soundEffects.checked = userSettings.sound_effects !== false;
@@ -2109,6 +2190,9 @@ async function saveSettings() {
   const soundEffects = document.getElementById('settingSoundEffects');
   const notifications = document.getElementById('settingNotifications');
   const theme = document.getElementById('settingTheme');
+
+  const autoFullscreen = document.getElementById('settingAutoFullscreen');
+  if (autoFullscreen) localStorage.setItem('autoFullscreen', autoFullscreen.checked);
 
   const settings = {
     default_game_length: gameLength ? parseInt(gameLength.value) : 10,

@@ -22,6 +22,7 @@ _MB_ARTIST_POOL_LAST_REFRESH = 0.0
 from libs.spotify_service import get_spotify_service
 from libs.spotify_oauth_service import get_spotify_oauth_service
 from libs.openai_service import get_openai_service
+from libs.leaderboard_service import get_leaderboard_service
 
 load_dotenv()
 
@@ -182,7 +183,7 @@ class Room:
             )
         return sorted(series_scores_list, key=lambda x: x["series_score"], reverse=True)
 
-    def record_answer(self, sid, answer, client_timestamp=None):
+    def record_answer(self, sid, answer, client_timestamp=None, client_response_time_ms=None):
         if self.question_index not in self.answers:
             self.answers[self.question_index] = {}
 
@@ -199,12 +200,13 @@ class Room:
         else:
             timestamp = datetime.now()
 
-        # Store answer with timestamp
+        # Store answer with timestamp and client-measured response time
         self.answers[self.question_index][sid] = {
             "answer": answer,
             "timestamp": timestamp,
             "server_received": datetime.now(),  # For debugging/validation
             "used_client_time": client_timestamp is not None,
+            "client_response_time_ms": client_response_time_ms,
         }
 
     def check_answer(self, sid, answer):
@@ -254,18 +256,33 @@ class Room:
            - delta_t = player_time - fastest_time
 
         3. Final score: base_score × time_factor
+
+        Uses client_response_time_ms (elapsed time measured on the client)
+        for ranking to eliminate network latency bias. Falls back to
+        server timestamps when client times are unavailable.
         """
         current_answers = self.answers.get(self.question_index, {})
         correct_answer_index = self.current_question["correct_answer"]
 
-        # Get all correct answers with timestamps
-        correct_answers = []
+        # Collect all correct answers
+        correct_answer_data = []
         for player_sid, answer_data in current_answers.items():
             if answer_data["answer"] == correct_answer_index:
-                correct_answers.append({"sid": player_sid, "timestamp": answer_data["timestamp"]})
+                correct_answer_data.append((player_sid, answer_data))
 
-        # Sort by timestamp (fastest first)
-        correct_answers.sort(key=lambda x: x["timestamp"])
+        # Build response time list, preferring client-measured times
+        correct_answers = []
+        for player_sid, answer_data in correct_answer_data:
+            client_rt = answer_data.get("client_response_time_ms")
+            if client_rt is not None and isinstance(client_rt, (int, float)) and client_rt > 0:
+                response_time_ms = float(client_rt)
+            else:
+                # Fallback: use server-received timestamp (absolute, so ranking still works)
+                response_time_ms = answer_data["server_received"].timestamp() * 1000
+            correct_answers.append({"sid": player_sid, "response_time_ms": response_time_ms})
+
+        # Sort by response time (fastest first)
+        correct_answers.sort(key=lambda x: x["response_time_ms"])
 
         # Find rank of current player (1-indexed)
         rank = next((i + 1 for i, a in enumerate(correct_answers) if a["sid"] == sid), 1)
@@ -276,13 +293,13 @@ class Room:
         score_base = S * (1 - alpha * (rank - 1))
 
         # STEP 2: Time-based coefficient
-        # Get player's response time
-        player_time = next((a["timestamp"] for a in correct_answers if a["sid"] == sid), 0)
-        # Get fastest response time
-        t_min = correct_answers[0]["timestamp"] if correct_answers else 0
+        # Get player's response time in ms
+        player_time_ms = next((a["response_time_ms"] for a in correct_answers if a["sid"] == sid), 0)
+        # Get fastest response time in ms
+        t_min_ms = correct_answers[0]["response_time_ms"] if correct_answers else 0
 
         # Calculate time delta in seconds
-        delta_t = (player_time - t_min).total_seconds()
+        delta_t = (player_time_ms - t_min_ms) / 1000.0
 
         # Time parameters
         T = 15  # Time window in seconds
@@ -344,6 +361,11 @@ def host():
 @app.route("/participant")
 def participant():
     return render_template("participant.html")
+
+
+@app.route("/leaderboard")
+def leaderboard():
+    return render_template("leaderboard.html")
 
 
 @app.route("/login")
@@ -454,18 +476,24 @@ def logout():
     if user_id and spotify_oauth_service:
         user_oauth_service = get_spotify_oauth_service(user_id=user_id)
         user_oauth_service.clear_user_cache()
-    else:
-        # Fallback: clear old global cache files if they exist
-        for cache_path in (".spotify_cache", ".cache"):
-            if os.path.exists(cache_path) and os.path.isfile(cache_path):
-                try:
-                    os.remove(cache_path)
-                    logger.info(f"Removed legacy cached token at {cache_path}")
-                except Exception as e:
-                    logger.error(f"Could not remove cache file {cache_path}: {e}")
+
+    # Clean up any legacy .cache file left by spotipy defaults
+    if os.path.exists(".cache") and os.path.isfile(".cache"):
+        try:
+            os.remove(".cache")
+            logger.info("Removed legacy .cache token file")
+        except Exception as e:
+            logger.error(f"Could not remove .cache file: {e}")
 
     session.clear()
-    return redirect("/")
+
+    # Clear Spotify's browser session via hidden iframe so the user
+    # can log in with a different account, then redirect home.
+    return '''<!DOCTYPE html>
+<html><body>
+<iframe src="https://accounts.spotify.com/logout" style="display:none"></iframe>
+<script>setTimeout(function(){ window.location.href = "/"; }, 1500);</script>
+</body></html>'''
 
 
 @app.route("/clear_session")
@@ -612,6 +640,49 @@ def user_stats():
     return jsonify(stats)
 
 
+@app.route("/api/leaderboard", methods=["GET", "DELETE"])
+def handle_leaderboard():
+    """Get or clear leaderboard for the current host"""
+    host_id = session.get("spotify_user_id")
+    if not host_id:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    if request.method == "DELETE":
+        lb = get_leaderboard_service(host_id)
+        lb._data = {"players": {}, "games": []}
+        lb._save()
+        logger.info(f"Leaderboard cleared for host {host_id}")
+        return jsonify({"success": True})
+
+    lb = get_leaderboard_service(host_id)
+    return jsonify({"players": lb.get_leaderboard()})
+
+
+@app.route("/api/leaderboard/history")
+def get_leaderboard_history():
+    """Get game history for the current host"""
+    host_id = session.get("spotify_user_id")
+    if not host_id:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    lb = get_leaderboard_service(host_id)
+    return jsonify({"games": lb.get_game_history()})
+
+
+@app.route("/api/leaderboard/player/<player_id>")
+def get_player_stats(player_id):
+    """Get stats for a specific player within this host's pool"""
+    host_id = session.get("spotify_user_id")
+    if not host_id:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    lb = get_leaderboard_service(host_id)
+    stats = lb.get_player_stats(player_id)
+    if not stats:
+        return jsonify({"error": "Player not found"}), 404
+    return jsonify(stats)
+
+
 @app.route("/my_playlists")
 def my_playlists():
     """Get user's Spotify playlists"""
@@ -725,6 +796,59 @@ def handle_disconnect():
             break
 
 
+def _record_game_to_leaderboard(room):
+    """Record completed game results to the host's leaderboard file."""
+    host_id = getattr(room, "host_user_id", None)
+    if not host_id:
+        logger.debug("No host_user_id on room, skipping leaderboard recording")
+        return
+
+    try:
+        lb = get_leaderboard_service(host_id)
+
+        # Build per-player stats from the room's answer data
+        player_stats = {}
+        for q_idx, q_answers in room.answers.items():
+            correct_idx = room.questions[q_idx]["correct_answer"] if q_idx < len(room.questions) else None
+            for sid, answer_data in q_answers.items():
+                if sid not in player_stats:
+                    player_stats[sid] = {"correct": 0, "total": 0, "response_times": []}
+                player_stats[sid]["total"] += 1
+                if correct_idx is not None and answer_data["answer"] == correct_idx:
+                    player_stats[sid]["correct"] += 1
+                rt = answer_data.get("client_response_time_ms")
+                if rt and isinstance(rt, (int, float)) and rt > 0:
+                    player_stats[sid]["response_times"].append(rt)
+
+        # Build player list for leaderboard
+        players = []
+        for sid, participant in room.participants.items():
+            stats = player_stats.get(sid, {"correct": 0, "total": 0, "response_times": []})
+            rts = stats["response_times"]
+            # Use series score if available, otherwise single game score
+            score = room.series_scores.get(sid, participant["score"])
+            players.append({
+                "player_id": participant.get("player_id", sid),
+                "name": participant["name"],
+                "score": score,
+                "correct": stats["correct"],
+                "total": stats["total"],
+                "fastest_ms": min(rts) if rts else None,
+                "avg_ms": round(sum(rts) / len(rts)) if rts else None,
+            })
+
+        game_data = {
+            "playlist_name": getattr(room, "playlist_name", "Unknown"),
+            "playlist_id": room.playlist_id,
+            "num_questions": len(room.questions),
+            "players": players,
+        }
+
+        lb.record_game(game_data)
+    except Exception as e:
+        logger.error(f"Failed to record game to leaderboard: {e}", exc_info=True)
+
+
 @socketio.on("create_room")
 def handle_create_room(data):
     playlist_id = data.get("playlist_id", "").strip()
@@ -746,6 +870,7 @@ def handle_create_room(data):
     token_info = session.get("spotify_token") or spotify_tokens.get(request.sid)
 
     room = Room(pin, request.sid, playlist_id, token_info)
+    room.host_user_id = session.get("spotify_user_id")
     rooms[pin] = room
 
     join_room(pin)
@@ -762,6 +887,7 @@ def handle_create_room(data):
 def handle_join_room(data):
     pin = data.get("pin", "").strip()
     name = data.get("name", "Anonymous").strip()
+    player_id = data.get("player_id")
 
     # Sanitize player name: limit length and strip HTML
     name = re.sub(r"<[^>]*>", "", name)[:30] or "Anonymous"
@@ -776,6 +902,10 @@ def handle_join_room(data):
     is_mid_game = room.state == "playing"
 
     room.add_participant(request.sid, name)
+
+    # Store player_id for leaderboard tracking
+    if player_id:
+        room.participants[request.sid]["player_id"] = player_id
     join_room(pin)
 
     # Prepare response data
@@ -1059,6 +1189,9 @@ def handle_start_game(data):
                 logger.info(f"  Description: {desc_preview}")
     except Exception as e:
         logger.warning(f"⚠ Could not fetch playlist context: {e}")
+
+    # Store playlist name on room for leaderboard
+    room.playlist_name = playlist_name or "Unknown Playlist"
 
     # Locale hint: useful to keep distractors language/scene-consistent.
     logger.info("\n=== 🌍 Locale Detection ===")
@@ -1896,16 +2029,33 @@ def handle_playback_started(data):
     # Notify all clients to start their timers
     socketio.emit("start_question_timer", {}, room=pin)
 
-    # Start timer now that playback has begun
-    def question_timeout():
-        socketio.sleep(15)
+    # Server-side fallback timer (longer than client's 15s) in case host disconnects
+    def question_timeout_fallback():
+        socketio.sleep(30)
         if pin in rooms and rooms[pin].question_index == current_question_index:
             if not rooms[pin].voting_closed:
-                logger.info(f"Question {current_question_index + 1} timeout in room {pin}")
+                logger.info(f"Question {current_question_index + 1} server fallback timeout in room {pin}")
                 socketio.emit("question_timeout", {}, room=pin)
                 close_voting_and_show_answer(pin)
 
-    socketio.start_background_task(question_timeout)
+    socketio.start_background_task(question_timeout_fallback)
+
+
+@socketio.on("host_timer_expired")
+def handle_host_timer_expired(data):
+    """Host's 15s countdown reached 0 — close voting immediately."""
+    pin = data.get("pin")
+    if pin not in rooms:
+        return
+
+    room = rooms[pin]
+    if request.sid != room.host_sid:
+        return
+
+    if not room.voting_closed:
+        logger.info(f"Host timer expired for question {room.question_index + 1} in room {pin}")
+        socketio.emit("question_timeout", {}, room=pin)
+        close_voting_and_show_answer(pin)
 
 
 def close_voting_and_show_answer(pin):
@@ -2043,6 +2193,7 @@ def handle_standings_displayed(data):
             if is_last_game:
                 # End the entire series
                 room.state = "ended"
+
                 socketio.emit(
                     "series_ended",
                     {
@@ -2052,6 +2203,9 @@ def handle_standings_displayed(data):
                     room=pin,
                 )
                 logger.info(f"Game series ended in room {pin} after {room.games_in_series} game(s)")
+
+                # Record to leaderboard (after emit so UI is never blocked)
+                _record_game_to_leaderboard(room)
             else:
                 # End current game and prepare for next
                 socketio.emit(
@@ -2163,8 +2317,9 @@ def handle_submit_answer(data):
         emit("error", {"message": "You have already answered this question"})
         return
 
-    # Record answer with client timestamp for fairness
-    room.record_answer(request.sid, answer, client_timestamp)
+    # Record answer with client timestamp and response time for fairness
+    client_response_time_ms = data.get("client_response_time_ms")
+    room.record_answer(request.sid, answer, client_timestamp, client_response_time_ms)
 
     # Check if correct
     is_correct = room.check_answer(request.sid, answer)

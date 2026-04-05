@@ -1,6 +1,7 @@
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,25 +33,24 @@ class SpotifyOAuthService:
         # user-library-read: Access user's saved tracks
         self.scope = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative user-top-read user-library-read"
 
-        # Create per-user cache directory and determine cache path
+        # Create per-user cache directory and determine cache handler
         self.cache_dir = ".spotify_cache"
-        self.cache_path = None
 
-        if use_cache:
+        if use_cache and user_id:
             os.makedirs(self.cache_dir, exist_ok=True)
-            # Use user-specific cache file if user_id provided
-            if user_id:
-                self.cache_path = os.path.join(self.cache_dir, f"{user_id}.json")
-            else:
-                # For global service without user_id, don't use cache
-                self.cache_path = None
+            cache_path = os.path.join(self.cache_dir, f"{user_id}.json")
+            cache_handler = CacheFileHandler(cache_path=cache_path)
+        else:
+            # No file caching — prevents one user's token leaking to another
+            cache_handler = MemoryCacheHandler()
 
         self.sp_oauth = SpotifyOAuth(
             client_id=self.client_id,
             client_secret=self.client_secret,
             redirect_uri=self.redirect_uri,
             scope=self.scope,
-            cache_path=self.cache_path,
+            cache_handler=cache_handler,
+            show_dialog=True,
         )
 
     def get_auth_url(self):
@@ -60,10 +60,10 @@ class SpotifyOAuthService:
     def get_access_token(self, code):
         """Exchange authorization code for access token"""
         try:
-            token_info = self.sp_oauth.get_access_token(code)
+            token_info = self.sp_oauth.get_access_token(code, check_cache=False)
             return token_info
         except Exception as e:
-            logger.error(f"Error getting access token: {e}")
+            logger.error(f"Error getting access token: {e}", exc_info=True)
             return None
 
     def get_spotify_client(self, token_info):
@@ -333,11 +333,14 @@ class SpotifyOAuthService:
 
     def clear_user_cache(self, user_id=None):
         """Clear cache for a specific user or the current instance's user"""
-        cache_path = self.cache_path
         if user_id:
             cache_path = os.path.join(self.cache_dir, f"{user_id}.json")
+        elif hasattr(self.sp_oauth.cache_handler, 'cache_path'):
+            cache_path = self.sp_oauth.cache_handler.cache_path
+        else:
+            return True
 
-        if os.path.exists(cache_path):
+        if cache_path and os.path.exists(cache_path):
             try:
                 os.remove(cache_path)
                 logger.info(f"Removed cached token at {cache_path}")
