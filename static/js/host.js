@@ -784,34 +784,7 @@ function loadUserPlaylists() {
         });
 
         card.addEventListener('click', () => {
-
-          // Remove pressed effect and selection from all cards
-          document.querySelectorAll('.playlist-card').forEach(c => {
-            c.classList.remove('selected');
-            c.style.transform = '';
-            c.style.boxShadow = '';
-          });
-
-          // Select this one and keep pressed effect
-          card.classList.add('selected');
-          card.style.transform = 'scale(0.92)';
-          card.style.boxShadow = '0 1px 4px rgba(102, 126, 234, 0.6)';
-          selectedPlaylistId = playlist.id;
-
-          // Show selected playlist display
-          const selectedDisplay = document.getElementById('selectedPlaylistDisplay');
-          const selectedImage = document.getElementById('selectedPlaylistImage');
-          const selectedName = document.getElementById('selectedPlaylistName');
-          const selectedInfo = document.getElementById('selectedPlaylistInfo');
-
-          selectedDisplay.classList.remove('hidden');
-          selectedImage.src = playlist.image || '';
-          selectedImage.style.display = playlist.image ? 'block' : 'none';
-          selectedName.textContent = playlist.name;
-          selectedInfo.textContent = `${playlist.tracks} tracks • by ${playlist.owner}`;
-
-          // Scroll to top to show selection
-          selectedDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          openPlaylistModal(playlist);
         });
 
         playlistGrid.appendChild(card);
@@ -836,19 +809,6 @@ function loadUserPlaylists() {
         });
       }
 
-      // Clear selection button
-      const clearBtn = document.getElementById('clearPlaylistBtn');
-      if (clearBtn) {
-        clearBtn.addEventListener('click', () => {
-          document.querySelectorAll('.playlist-card').forEach(c => {
-            c.classList.remove('selected');
-            c.style.transform = '';
-            c.style.boxShadow = '';
-          });
-          document.getElementById('selectedPlaylistDisplay').classList.add('hidden');
-          selectedPlaylistId = null;
-        });
-      }
     })
     .catch(err => {
       console.error('Error loading playlists:', err);
@@ -1783,6 +1743,15 @@ function startVisualizerAnimation(trackName) {
   simulatedVisualize(canvas, canvasCtx, trackName);
 }
 
+function resizeCanvas(canvas) {
+  const displayWidth = canvas.clientWidth;
+  const displayHeight = canvas.clientHeight;
+  if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+    canvas.width = displayWidth;
+    canvas.height = displayHeight;
+  }
+}
+
 function visualize(canvas, canvasCtx) {
   if (!analyser) return;
 
@@ -1792,6 +1761,7 @@ function visualize(canvas, canvasCtx) {
     if (!animationRunning) return;
 
     animationId = requestAnimationFrame(draw);
+    resizeCanvas(canvas);
     analyser.getByteFrequencyData(dataArray);
 
     // Clear canvas with background matching theme
@@ -1848,6 +1818,7 @@ function simulatedVisualize(canvas, canvasCtx, trackName) {
     if (!animationRunning) return;
 
     animationId = requestAnimationFrame(draw);
+    resizeCanvas(canvas);
 
     const now = Date.now();
     const elapsed = now - startTime;
@@ -2003,7 +1974,9 @@ function showErrorModal(title, message) {
     modal.classList.remove('hidden');
 
     // Prevent body scroll when modal is open
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = 'hidden';
+    document.body.style.paddingRight = scrollbarWidth + 'px';
   }
 }
 
@@ -2012,14 +1985,66 @@ function closeErrorModal() {
   if (modal) {
     modal.classList.add('hidden');
     document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
   }
 }
+
+// Playlist selection modal
+function openPlaylistModal(playlist) {
+  const modal = document.getElementById('playlistModal');
+  const modalImage = document.getElementById('playlistModalImage');
+  const modalName = document.getElementById('playlistModalName');
+  const modalInfo = document.getElementById('playlistModalInfo');
+  const modalOwner = document.getElementById('playlistModalOwner');
+
+  if (playlist.image) {
+    modalImage.src = playlist.image;
+    modalImage.style.display = 'block';
+  } else {
+    modalImage.style.display = 'none';
+  }
+  modalName.textContent = playlist.name;
+  modalInfo.textContent = `${playlist.tracks} tracks`;
+  modalOwner.textContent = `by ${playlist.owner}`;
+
+  selectedPlaylistId = playlist.id;
+
+  modal.classList.remove('hidden');
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  document.body.style.overflow = 'hidden';
+  document.body.style.paddingRight = scrollbarWidth + 'px';
+}
+
+function closePlaylistModal() {
+  const modal = document.getElementById('playlistModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+  }
+}
+
+// Playlist modal event listeners
+document.getElementById('closePlaylistModal')?.addEventListener('click', closePlaylistModal);
+
+document.getElementById('playlistModal')?.addEventListener('click', (e) => {
+  if (e.target.classList.contains('modal-backdrop')) {
+    closePlaylistModal();
+  }
+});
+
+document.getElementById('playlistModalCreateBtn')?.addEventListener('click', () => {
+  if (!selectedPlaylistId) return;
+  closePlaylistModal();
+  socket.emit('create_room', { playlist_id: selectedPlaylistId });
+});
 
 // Close modal on Escape key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeErrorModal();
     closeSettingsModal();
+    closePlaylistModal();
   }
 });
 
@@ -2137,7 +2162,9 @@ function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
     modal.classList.remove('hidden');
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = 'hidden';
+    document.body.style.paddingRight = scrollbarWidth + 'px';
 
     // Close profile menu
     const userMenu = document.getElementById('userMenu');
@@ -2173,6 +2200,7 @@ function closeSettingsModal() {
   if (modal) {
     modal.classList.add('hidden');
     document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
   }
 }
 

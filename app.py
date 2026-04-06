@@ -947,6 +947,7 @@ def handle_rejoin(data):
     pin = data.get("pin")
     name = data.get("name")
     was_host = data.get("was_host", False)
+    player_id = data.get("player_id")
 
     logger.info(f"Rejoin attempt - PIN: {pin}, Name: {name}, Was Host: {was_host}")
 
@@ -1017,13 +1018,16 @@ def handle_rejoin(data):
             # Remove old SID entry
             del room.participants[old_sid]
 
-            # Add with new SID, preserving score
+            # Add with new SID, preserving score and player_id
+            resolved_player_id = player_id or old_participant_data.get("player_id")
             room.participants[request.sid] = {
                 "sid": request.sid,
                 "name": name,
                 "score": current_score,
                 "disconnected": False,  # Clear disconnected flag
             }
+            if resolved_player_id:
+                room.participants[request.sid]["player_id"] = resolved_player_id
 
             # Preserve series score if exists
             if old_sid in room.series_scores:

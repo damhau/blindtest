@@ -55,10 +55,10 @@ document.addEventListener('visibilitychange', async () => {
 
 // Persistent player identity for leaderboard tracking
 function getPlayerId() {
-  let id = getCookie('blindtest_player_id');
+  let id = localStorage.getItem('blindtest_player_id');
   if (!id) {
     id = crypto.randomUUID ? crypto.randomUUID() : 'p-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    setCookie('blindtest_player_id', id, 365);
+    localStorage.setItem('blindtest_player_id', id);
   }
   return id;
 }
@@ -664,7 +664,8 @@ socket.on('connect', () => {
     socket.emit('rejoin_room', {
       pin: currentPin,
       name: currentName,
-      was_host: false
+      was_host: false,
+      player_id: playerId
     });
   } else if (!isReconnecting) {
     // Initial connection, not a reconnect

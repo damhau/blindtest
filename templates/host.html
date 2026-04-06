@@ -148,6 +148,10 @@
       font-size: 2.75rem !important;
     }
 
+    .is-fullscreen #audioVisualizer {
+      height: 200px !important;
+    }
+
     .is-fullscreen #compactPinDisplay {
       top: auto !important;
       bottom: 1rem !important;
@@ -343,7 +347,6 @@
     <div id="createScreen" class="screen">
       <div class="text-center mb-8">
         <h1 class="text-4xl font-bold text-gray-800 mb-2">Host a Blindtest</h1>
-        <p class="text-gray-600">Choose a playlist to create your music quiz</p>
       </div>
 
       <div class="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-8">
@@ -355,29 +358,11 @@
               class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent w-64">
           </div>
 
-          <!-- Selected Playlist Display -->
-          <div id="selectedPlaylistDisplay"
-            class="hidden mb-6 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-primary rounded-xl">
-            <div class="flex items-center gap-4">
-              <img id="selectedPlaylistImage" src="" alt="Playlist" class="w-16 h-16 rounded-lg object-cover">
-              <div class="flex-1">
-                <p class="text-sm text-gray-600 font-medium">Selected Playlist</p>
-                <h4 id="selectedPlaylistName" class="text-lg font-bold text-gray-800"></h4>
-                <p id="selectedPlaylistInfo" class="text-sm text-gray-600"></p>
-              </div>
-              <button id="clearPlaylistBtn" class="text-gray-500 hover:text-gray-700 p-2">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
           <div id="playlistLoading" class="text-center py-8">
             <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
             <p class="mt-4 text-gray-600">Loading your playlists...</p>
           </div>
-          <div id="playlistGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+          <div id="playlistGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto pr-2"></div>
         </div>
 
         <!-- Manual Input (fallback) -->
@@ -535,7 +520,7 @@
 
           <!-- Audio Visualizer -->
           <div class="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-            <canvas id="audioVisualizer" width="800" height="120" class="w-full rounded" role="img" aria-label="Audio visualizer"></canvas>
+            <canvas id="audioVisualizer" class="w-full rounded" style="height: 120px;" role="img" aria-label="Audio visualizer"></canvas>
           </div>
 
           <!-- Answer Options Grid -->
@@ -654,6 +639,26 @@
             Try Again
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Playlist Selection Modal -->
+    <div id="playlistModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content max-w-lg text-center">
+        <button id="closePlaylistModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <img id="playlistModalImage" src="" alt="Playlist cover" class="w-40 h-40 rounded-xl mx-auto mb-4 object-cover shadow-md">
+        <h2 id="playlistModalName" class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-1"></h2>
+        <p id="playlistModalInfo" class="text-gray-600 dark:text-gray-400 mb-1"></p>
+        <p id="playlistModalOwner" class="text-sm text-gray-500 dark:text-gray-400 mb-6"></p>
+        <button id="playlistModalCreateBtn"
+          class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-4 rounded-lg shadow-lg transition-all text-lg">
+          Create Blindtest Room
+        </button>
       </div>
     </div>
 
