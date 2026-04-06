@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visualizer Demo 2</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 10px; font-size: 1.5rem; }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    button {
+      padding: 10px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      background: #667eea;
+      color: white;
+      font-weight: 600;
+    }
+    button:hover { background: #5a6fd6; }
+    button.active { background: #22c55e; }
+    label { font-size: 0.9rem; }
+    input[type=range] { width: 120px; vertical-align: middle; }
+    .demos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 30px;
+      justify-content: center;
+      width: 100%;
+      max-width: 1400px;
+    }
+    .demo-card {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .demo-card h2 {
+      font-size: 1rem;
+      margin-bottom: 10px;
+      color: #aaa;
+    }
+    canvas { display: block; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Visualizer Ideas — Set 2</h1>
+  <div class="controls">
+    <button id="startBtn">Start Mic</button>
+    <button id="themeBtn">Light Mode</button>
+    <label>Gain: <span id="gainVal">4</span>x</label>
+    <input type="range" id="gainSlider" min="1" max="15" value="4" step="0.5">
+  </div>
+
+  <div class="demos">
+    <div class="demo-card">
+      <h2>A — Particle Wave Ocean</h2>
+      <canvas id="vizA" width="700" height="350"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>B — Green Dot Matrix</h2>
+      <canvas id="vizB" width="700" height="300"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>C — Tangled Waveforms</h2>
+      <canvas id="vizC" width="700" height="300"></canvas>
+    </div>
+  </div>
+
+  <script>
+    let audioCtx, analyser, gainNode, micStream;
+    let dataArray, bufferLength;
+    let running = false;
+    let darkMode = true;
+
+    const startBtn = document.getElementById('startBtn');
+    const themeBtn = document.getElementById('themeBtn');
+    const gainSlider = document.getElementById('gainSlider');
+    const gainVal = document.getElementById('gainVal');
+
+    themeBtn.addEventListener('click', () => {
+      darkMode = !darkMode;
+      themeBtn.textContent = darkMode ? 'Light Mode' : 'Dark Mode';
+      document.body.style.background = darkMode ? '#1a1a2e' : '#e8e8e8';
+      document.querySelectorAll('.demo-card').forEach(c => {
+        c.style.background = darkMode ? '#16213e' : '#fff';
+        c.querySelector('h2').style.color = darkMode ? '#aaa' : '#555';
+      });
+    });
+
+    gainSlider.addEventListener('input', () => {
+      gainVal.textContent = gainSlider.value;
+      if (gainNode) gainNode.gain.value = parseFloat(gainSlider.value);
+    });
+
+    startBtn.addEventListener('click', async () => {
+      if (running) {
+        micStream.getTracks().forEach(t => t.stop());
+        running = false;
+        startBtn.textContent = 'Start Mic';
+        startBtn.classList.remove('active');
+        return;
+      }
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioCtx.createMediaStreamSource(micStream);
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = parseFloat(gainSlider.value);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.minDecibels = -80;
+        analyser.maxDecibels = -20;
+        analyser.smoothingTimeConstant = 0.85;
+        source.connect(gainNode);
+        gainNode.connect(analyser);
+        bufferLength = analyser.frequencyBinCount;
+        dataArray = new Uint8Array(bufferLength);
+        running = true;
+        startBtn.textContent = 'Stop Mic';
+        startBtn.classList.add('active');
+        draw();
+      } catch (e) {
+        alert('Mic access denied: ' + e.message);
+      }
+    });
+
+    function draw() {
+      if (!running) return;
+      requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(dataArray);
+
+      drawParticleWave(document.getElementById('vizA'));
+      drawDotMatrix(document.getElementById('vizB'));
+      drawTangledWaves(document.getElementById('vizC'));
+    }
+
+    // ============================================================
+    // A — Particle Wave Ocean
+    // Flowing 3D dot grid that undulates with audio
+    // ============================================================
+    let waveOceanTime = 0;
+
+    function drawParticleWave(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Dark blue gradient background
+      if (darkMode) {
+        const bg = ctx.createLinearGradient(0, 0, 0, h);
+        bg.addColorStop(0, '#0a0e2a');
+        bg.addColorStop(1, '#060818');
+        ctx.fillStyle = bg;
+      } else {
+        ctx.fillStyle = '#e8eef8';
+      }
+      ctx.fillRect(0, 0, w, h);
+
+      waveOceanTime += 0.02;
+
+      const cols = 60;
+      const rows = 25;
+      const spacing = w / cols;
+
+      // Perspective parameters
+      const vanishY = h * 0.25;  // horizon line
+      const maxDepth = rows;
+
+      for (let z = rows - 1; z >= 0; z--) {
+        const depthRatio = z / maxDepth;
+        // Perspective: rows further back are closer to vanishY
+        const rowY = vanishY + depthRatio * depthRatio * (h - vanishY);
+        const rowScale = 0.15 + (1 - depthRatio) * 0.85;
+        const rowAlpha = 0.2 + (1 - depthRatio) * 0.8;
+        const rowSpacing = spacing * rowScale;
+        const rowStartX = (w - cols * rowSpacing) / 2;
+
+        for (let x = 0; x < cols; x++) {
+          // Map to frequency bins
+          const binIdx = Math.floor((x / cols) * Math.min(bufferLength, 64));
+          const value = (dataArray[binIdx] || 0) / 255;
+
+          // Wave displacement
+          const wave1 = Math.sin(x * 0.15 + waveOceanTime * 1.5 + z * 0.3) * 15;
+          const wave2 = Math.sin(x * 0.08 + waveOceanTime * 0.8 - z * 0.2) * 10;
+          const audioDisp = value * 25 * (1 - depthRatio);
+
+          const px = rowStartX + x * rowSpacing;
+          const py = rowY + wave1 + wave2 - audioDisp;
+          const dotSize = (1 + value * 2.5) * rowScale;
+
+          // Color: blue base, brighter with audio
+          const brightness = 30 + value * 50;
+          const hue = darkMode ? 210 : 220;
+          const sat = darkMode ? 80 : 60;
+
+          ctx.beginPath();
+          ctx.arc(px, py, dotSize, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${hue}, ${sat}%, ${brightness}%, ${rowAlpha})`;
+          ctx.fill();
+
+          // Glow for high-energy dots
+          if (value > 0.4 && darkMode) {
+            ctx.shadowColor = `hsla(200, 100%, 70%, ${value * 0.5})`;
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.arc(px, py, dotSize * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+          }
+        }
+      }
+
+      // Connecting lines between adjacent dots in the front rows for mesh feel
+      ctx.shadowBlur = 0;
+      for (let z = 0; z < Math.min(8, rows); z++) {
+        const depthRatio = z / maxDepth;
+        const rowY = vanishY + depthRatio * depthRatio * (h - vanishY);
+        const rowScale = 0.15 + (1 - depthRatio) * 0.85;
+        const rowSpacing = spacing * rowScale;
+        const rowStartX = (w - cols * rowSpacing) / 2;
+        const lineAlpha = (1 - depthRatio) * 0.15;
+
+        ctx.beginPath();
+        for (let x = 0; x < cols; x++) {
+          const binIdx = Math.floor((x / cols) * Math.min(bufferLength, 64));
+          const value = (dataArray[binIdx] || 0) / 255;
+          const wave1 = Math.sin(x * 0.15 + waveOceanTime * 1.5 + z * 0.3) * 15;
+          const wave2 = Math.sin(x * 0.08 + waveOceanTime * 0.8 - z * 0.2) * 10;
+          const audioDisp = value * 25 * (1 - depthRatio);
+          const px = rowStartX + x * rowSpacing;
+          const py = rowY + wave1 + wave2 - audioDisp;
+
+          if (x === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.strokeStyle = darkMode
+          ? `rgba(80,160,255,${lineAlpha})`
+          : `rgba(40,80,180,${lineAlpha})`;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+    }
+
+    // ============================================================
+    // B — Green Dot Matrix
+    // Retro LED circular dots instead of rectangular blocks
+    // ============================================================
+    function drawDotMatrix(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#020802' : '#f0f5f0';
+      ctx.fillRect(0, 0, w, h);
+
+      const cols = 40;
+      const rows = 20;
+      const dotSpacingX = w / (cols + 1);
+      const dotSpacingY = h / (rows + 1);
+      const maxDotR = Math.min(dotSpacingX, dotSpacingY) * 0.35;
+
+      for (let col = 0; col < cols; col++) {
+        const binIdx = Math.floor((col / cols) * Math.min(bufferLength, 64));
+        const value = (dataArray[binIdx] || 0) / 255;
+        const litRows = Math.round(value * rows);
+
+        const cx = dotSpacingX * (col + 1);
+
+        for (let row = 0; row < rows; row++) {
+          const rowFromBottom = rows - 1 - row;
+          const isLit = rowFromBottom < litRows;
+          const cy = dotSpacingY * (row + 1);
+
+          if (isLit) {
+            // Color zones: green bottom, yellow mid, red top
+            let hue, sat, lum;
+            const rowPct = rowFromBottom / rows;
+            if (rowPct < 0.6) {
+              hue = 120; sat = 100; lum = 45;
+            } else if (rowPct < 0.8) {
+              hue = 60; sat = 100; lum = 45;
+            } else {
+              hue = 0; sat = 100; lum = 45;
+            }
+
+            // Glow
+            ctx.shadowColor = `hsla(${hue}, ${sat}%, ${lum}%, 0.7)`;
+            ctx.shadowBlur = 6;
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, maxDotR, 0, Math.PI * 2);
+            ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lum}%)`;
+            ctx.fill();
+
+            // Bright center highlight
+            ctx.beginPath();
+            ctx.arc(cx, cy, maxDotR * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lum + 30}%)`;
+            ctx.fill();
+          } else {
+            // Dim unlit dot
+            ctx.shadowBlur = 0;
+            ctx.beginPath();
+            ctx.arc(cx, cy, maxDotR * 0.7, 0, Math.PI * 2);
+            ctx.fillStyle = darkMode
+              ? 'rgba(0,60,0,0.25)'
+              : 'rgba(0,80,0,0.1)';
+            ctx.fill();
+          }
+        }
+      }
+
+      ctx.shadowBlur = 0;
+    }
+
+    // ============================================================
+    // C — Tangled Waveforms
+    // Multiple overlapping colorful organic waveform ribbons
+    // ============================================================
+    let tangleTime = 0;
+    const tangleColors = [
+      { r: 100, g: 40, b: 200 },   // purple
+      { r: 40, g: 60, b: 220 },    // blue
+      { r: 200, g: 40, b: 60 },    // red
+      { r: 230, g: 180, b: 30 },   // yellow/gold
+      { r: 60, g: 40, b: 180 },    // indigo
+      { r: 220, g: 100, b: 40 },   // orange
+      { r: 140, g: 30, b: 180 },   // violet
+      { r: 40, g: 160, b: 200 },   // teal
+    ];
+
+    function drawTangledWaves(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#0a0a14' : '#f2f0f0';
+      ctx.fillRect(0, 0, w, h);
+
+      tangleTime += 0.025;
+
+      const centerY = h / 2;
+      const numLines = tangleColors.length;
+      const points = 120;
+
+      // Horizontal center line
+      ctx.beginPath();
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(w, centerY);
+      ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      for (let line = 0; line < numLines; line++) {
+        const c = tangleColors[line];
+        const phaseOffset = line * 0.9;
+        const freqMult = 0.8 + line * 0.15;
+        const speedMult = 0.6 + line * 0.12;
+
+        ctx.beginPath();
+
+        for (let i = 0; i <= points; i++) {
+          const t = i / points;
+          const x = t * w;
+
+          // Sample multiple frequency bins for organic movement
+          const bin1 = Math.floor(t * Math.min(bufferLength, 50));
+          const bin2 = Math.floor(((t + 0.1) % 1) * Math.min(bufferLength, 50));
+          const v1 = (dataArray[bin1] || 0) / 255;
+          const v2 = (dataArray[bin2] || 0) / 255;
+          const freqValue = (v1 + v2) / 2;
+
+          // Multiple sine components for organic shapes
+          const wave1 = Math.sin(t * Math.PI * 3 * freqMult + tangleTime * speedMult + phaseOffset);
+          const wave2 = Math.sin(t * Math.PI * 5.5 + tangleTime * 1.2 + phaseOffset * 1.5) * 0.5;
+          const wave3 = Math.sin(t * Math.PI * 1.5 + tangleTime * 0.5 - phaseOffset) * 0.3;
+
+          const amplitude = freqValue * h * 0.35;
+          const y = centerY + (wave1 + wave2 + wave3) * amplitude * 0.5;
+
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+
+        // Multiple stroke passes for thickness/glow feel
+        for (let pass = 2; pass >= 0; pass--) {
+          const alpha = pass === 0 ? 0.7 : 0.15 / pass;
+          const lw = pass === 0 ? 1.8 : 4 + pass * 3;
+
+          ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${alpha})`;
+          ctx.lineWidth = lw;
+          ctx.stroke();
+        }
+      }
+
+      // Small bright dots at peaks for sparkle
+      for (let line = 0; line < numLines; line++) {
+        const c = tangleColors[line];
+        const phaseOffset = line * 0.9;
+        const freqMult = 0.8 + line * 0.15;
+        const speedMult = 0.6 + line * 0.12;
+
+        for (let i = 0; i <= points; i += 8) {
+          const t = i / points;
+          const x = t * w;
+          const bin1 = Math.floor(t * Math.min(bufferLength, 50));
+          const v1 = (dataArray[bin1] || 0) / 255;
+
+          if (v1 > 0.5) {
+            const wave1 = Math.sin(t * Math.PI * 3 * freqMult + tangleTime * speedMult + phaseOffset);
+            const wave2 = Math.sin(t * Math.PI * 5.5 + tangleTime * 1.2 + phaseOffset * 1.5) * 0.5;
+            const wave3 = Math.sin(t * Math.PI * 1.5 + tangleTime * 0.5 - phaseOffset) * 0.3;
+            const amplitude = v1 * h * 0.35;
+            const y = centerY + (wave1 + wave2 + wave3) * amplitude * 0.5;
+
+            ctx.beginPath();
+            ctx.arc(x, y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${Math.min(255, c.r + 80)},${Math.min(255, c.g + 80)},${Math.min(255, c.b + 80)},${v1})`;
+            ctx.fill();
+          }
+        }
+      }
+    }
+  </script>
+</body>
+</html>

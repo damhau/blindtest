@@ -1731,6 +1731,10 @@ const VISUALIZER_STYLES = [
   'bars-dark', 'bars-light',
   'mirror-dark', 'mirror-light',
   'led-dark', 'led-light',
+  'aurora-dark', 'aurora-light',
+  'ocean-dark', 'ocean-light',
+  'dotmatrix-dark', 'dotmatrix-light',
+  'tangled-dark', 'tangled-light',
 ];
 
 // Neon Waves state
@@ -1747,6 +1751,32 @@ let waveTime = 0;
 const spectrumHistory = [];
 const HISTORY_DEPTH = 20;
 let spectrumFrame = 0;
+
+// Aurora Borealis state
+let auroraTime = 0;
+const auroraBands = [
+  { r: 0, g: 220, b: 100, speed: 0.8, freq: 2.5 },
+  { r: 50, g: 180, b: 255, speed: 1.1, freq: 3.0 },
+  { r: 100, g: 50, b: 255, speed: 0.6, freq: 2.0 },
+  { r: 0, g: 255, b: 180, speed: 1.4, freq: 3.5 },
+  { r: 200, g: 50, b: 200, speed: 0.9, freq: 2.8 },
+];
+
+// Particle Wave Ocean state
+let waveOceanTime = 0;
+
+// Tangled Waveforms state
+let tangleTime = 0;
+const tangleColors = [
+  { r: 100, g: 40, b: 200 },
+  { r: 40, g: 60, b: 220 },
+  { r: 200, g: 40, b: 60 },
+  { r: 230, g: 180, b: 30 },
+  { r: 60, g: 40, b: 180 },
+  { r: 220, g: 100, b: 40 },
+  { r: 140, g: 30, b: 180 },
+  { r: 40, g: 160, b: 200 },
+];
 
 // Microphone visualization
 let micStream = null;
@@ -1844,6 +1874,10 @@ function dispatchDraw(canvas, ctx, isDark) {
     case 'bars': drawBars(canvas, ctx, isDark); break;
     case 'mirror': drawMirror(canvas, ctx, isDark); break;
     case 'led': drawLedBars(canvas, ctx, isDark); break;
+    case 'aurora': drawAurora(canvas, ctx, isDark); break;
+    case 'ocean': drawParticleWave(canvas, ctx, isDark); break;
+    case 'dotmatrix': drawDotMatrix(canvas, ctx, isDark); break;
+    case 'tangled': drawTangledWaves(canvas, ctx, isDark); break;
     default: drawVintageVU(canvas, ctx, true);
   }
 }
@@ -2410,6 +2444,240 @@ function drawLedBars(canvas, ctx, isDark) {
   }
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
+}
+
+// ===== Aurora Borealis =====
+function drawAurora(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.fillStyle = isDark ? '#020810' : '#e8eef5';
+  ctx.fillRect(0, 0, w, h);
+
+  auroraTime += 0.015;
+
+  ctx.globalCompositeOperation = isDark ? 'lighter' : 'multiply';
+
+  for (let b = 0; b < auroraBands.length; b++) {
+    const band = auroraBands[b];
+    const binStart = Math.floor((b / auroraBands.length) * bufferLength * 0.6);
+    const binEnd = Math.floor(((b + 1) / auroraBands.length) * bufferLength * 0.6);
+
+    let energy = 0;
+    for (let i = binStart; i < binEnd; i++) energy += dataArray[i];
+    energy = energy / ((binEnd - binStart) * 255);
+
+    const baseY = h * 0.2 + (b / auroraBands.length) * h * 0.5;
+    const ribbonH = 20 + energy * h * 0.25;
+
+    ctx.beginPath();
+    ctx.moveTo(0, baseY);
+
+    const points = 50;
+    for (let i = 0; i <= points; i++) {
+      const t = i / points;
+      const x = t * w;
+      const wave1 = Math.sin(t * Math.PI * band.freq + auroraTime * band.speed) * ribbonH;
+      const wave2 = Math.sin(t * Math.PI * 1.5 + auroraTime * 0.7 + b) * ribbonH * 0.4;
+      ctx.lineTo(x, baseY + wave1 + wave2);
+    }
+
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+
+    const alpha = 0.15 + energy * 0.25;
+    ctx.fillStyle = isDark
+      ? `rgba(${band.r},${band.g},${band.b},${alpha})`
+      : `rgba(${Math.round(band.r * 0.7)},${Math.round(band.g * 0.7)},${Math.round(band.b * 0.7)},${alpha * 0.8})`;
+    ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// ===== Particle Wave Ocean =====
+function drawParticleWave(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  if (isDark) {
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0a0e2a');
+    bg.addColorStop(1, '#060818');
+    ctx.fillStyle = bg;
+  } else {
+    ctx.fillStyle = '#e8eef8';
+  }
+  ctx.fillRect(0, 0, w, h);
+
+  waveOceanTime += 0.02;
+
+  const cols = 60;
+  const rows = 25;
+  const spacing = w / cols;
+  const vanishY = h * 0.25;
+  const maxDepth = rows;
+
+  for (let z = rows - 1; z >= 0; z--) {
+    const depthRatio = z / maxDepth;
+    const rowY = vanishY + depthRatio * depthRatio * (h - vanishY);
+    const rowScale = 0.15 + (1 - depthRatio) * 0.85;
+    const rowAlpha = 0.2 + (1 - depthRatio) * 0.8;
+    const rowSpacing = spacing * rowScale;
+    const rowStartX = (w - cols * rowSpacing) / 2;
+
+    for (let x = 0; x < cols; x++) {
+      const binIdx = Math.floor((x / cols) * Math.min(bufferLength, 64));
+      const value = (dataArray[binIdx] || 0) / 255;
+      const wave1 = Math.sin(x * 0.15 + waveOceanTime * 1.5 + z * 0.3) * 15;
+      const wave2 = Math.sin(x * 0.08 + waveOceanTime * 0.8 - z * 0.2) * 10;
+      const audioDisp = value * 25 * (1 - depthRatio);
+      const px = rowStartX + x * rowSpacing;
+      const py = rowY + wave1 + wave2 - audioDisp;
+      const dotSize = (1 + value * 2.5) * rowScale;
+
+      const brightness = 30 + value * 50;
+      const hue = isDark ? 210 : 220;
+      const sat = isDark ? 80 : 60;
+
+      ctx.beginPath();
+      ctx.arc(px, py, dotSize, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${hue}, ${sat}%, ${brightness}%, ${rowAlpha})`;
+      ctx.fill();
+    }
+  }
+
+  // Connecting lines for front rows
+  ctx.shadowBlur = 0;
+  for (let z = 0; z < Math.min(8, rows); z++) {
+    const depthRatio = z / maxDepth;
+    const rowY = vanishY + depthRatio * depthRatio * (h - vanishY);
+    const rowScale = 0.15 + (1 - depthRatio) * 0.85;
+    const rowSpacing = spacing * rowScale;
+    const rowStartX = (w - cols * rowSpacing) / 2;
+    const lineAlpha = (1 - depthRatio) * 0.15;
+
+    ctx.beginPath();
+    for (let x = 0; x < cols; x++) {
+      const binIdx = Math.floor((x / cols) * Math.min(bufferLength, 64));
+      const value = (dataArray[binIdx] || 0) / 255;
+      const wave1 = Math.sin(x * 0.15 + waveOceanTime * 1.5 + z * 0.3) * 15;
+      const wave2 = Math.sin(x * 0.08 + waveOceanTime * 0.8 - z * 0.2) * 10;
+      const audioDisp = value * 25 * (1 - depthRatio);
+      const px = rowStartX + x * rowSpacing;
+      const py = rowY + wave1 + wave2 - audioDisp;
+      if (x === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = isDark
+      ? `rgba(80,160,255,${lineAlpha})`
+      : `rgba(40,80,180,${lineAlpha})`;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+}
+
+// ===== Green Dot Matrix =====
+function drawDotMatrix(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.fillStyle = isDark ? '#020802' : '#f0f5f0';
+  ctx.fillRect(0, 0, w, h);
+
+  const cols = 40;
+  const rows = 20;
+  const dotSpacingX = w / (cols + 1);
+  const dotSpacingY = h / (rows + 1);
+  const maxDotR = Math.min(dotSpacingX, dotSpacingY) * 0.35;
+
+  for (let col = 0; col < cols; col++) {
+    const binIdx = Math.floor((col / cols) * Math.min(bufferLength, 64));
+    const value = (dataArray[binIdx] || 0) / 255;
+    const litRows = Math.round(value * rows);
+    const cx = dotSpacingX * (col + 1);
+
+    for (let row = 0; row < rows; row++) {
+      const rowFromBottom = rows - 1 - row;
+      const isLit = rowFromBottom < litRows;
+      const cy = dotSpacingY * (row + 1);
+
+      if (isLit) {
+        let hue;
+        const rowPct = rowFromBottom / rows;
+        if (rowPct < 0.6) hue = 120;
+        else if (rowPct < 0.8) hue = 60;
+        else hue = 0;
+
+        ctx.shadowColor = `hsla(${hue}, 100%, 45%, 0.7)`;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(cx, cy, maxDotR, 0, Math.PI * 2);
+        ctx.fillStyle = `hsl(${hue}, 100%, 45%)`;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, maxDotR * 0.4, 0, Math.PI * 2);
+        ctx.fillStyle = `hsl(${hue}, 100%, 75%)`;
+        ctx.fill();
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.arc(cx, cy, maxDotR * 0.7, 0, Math.PI * 2);
+        ctx.fillStyle = isDark ? 'rgba(0,60,0,0.25)' : 'rgba(0,80,0,0.1)';
+        ctx.fill();
+      }
+    }
+  }
+  ctx.shadowBlur = 0;
+}
+
+// ===== Tangled Waveforms =====
+function drawTangledWaves(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.fillStyle = isDark ? '#0a0a14' : '#f2f0f0';
+  ctx.fillRect(0, 0, w, h);
+
+  tangleTime += 0.025;
+  const centerY = h / 2;
+  const numLines = tangleColors.length;
+  const pts = 120;
+
+  for (let line = 0; line < numLines; line++) {
+    const c = tangleColors[line];
+    const phaseOffset = line * 0.9;
+    const freqMult = 0.8 + line * 0.15;
+    const speedMult = 0.6 + line * 0.12;
+
+    ctx.beginPath();
+    for (let i = 0; i <= pts; i++) {
+      const t = i / pts;
+      const x = t * w;
+      const bin1 = Math.floor(t * Math.min(bufferLength, 50));
+      const bin2 = Math.floor(((t + 0.1) % 1) * Math.min(bufferLength, 50));
+      const freqValue = ((dataArray[bin1] || 0) + (dataArray[bin2] || 0)) / 510;
+
+      const wave1 = Math.sin(t * Math.PI * 3 * freqMult + tangleTime * speedMult + phaseOffset);
+      const wave2 = Math.sin(t * Math.PI * 5.5 + tangleTime * 1.2 + phaseOffset * 1.5) * 0.5;
+      const wave3 = Math.sin(t * Math.PI * 1.5 + tangleTime * 0.5 - phaseOffset) * 0.3;
+      const amplitude = freqValue * h * 0.35;
+      const y = centerY + (wave1 + wave2 + wave3) * amplitude * 0.5;
+
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+
+    for (let pass = 2; pass >= 0; pass--) {
+      const alpha = pass === 0 ? 0.7 : 0.15 / pass;
+      const lw = pass === 0 ? 1.8 : 4 + pass * 3;
+      ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${alpha})`;
+      ctx.lineWidth = lw;
+      ctx.stroke();
+    }
+  }
 }
 
 function simulatedVisualize(canvas, canvasCtx) {

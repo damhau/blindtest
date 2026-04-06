@@ -101,6 +101,30 @@
       <h2>G — 3D Bars (static)</h2>
       <canvas id="vuG" width="700" height="300"></canvas>
     </div>
+    <div class="demo-card">
+      <h2>H — Spectrogram (Waterfall)</h2>
+      <canvas id="vuH" width="700" height="250"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>I — Particles</h2>
+      <canvas id="vuI" width="700" height="300"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>J — Terrain (Joy Division)</h2>
+      <canvas id="vuJ" width="700" height="300"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>K — Aurora Borealis</h2>
+      <canvas id="vuK" width="700" height="280"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>L — Matrix Rain</h2>
+      <canvas id="vuL" width="700" height="300"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>M — Rainbow Mesh</h2>
+      <canvas id="vuM" width="700" height="300"></canvas>
+    </div>
   </div>
 
   <script>
@@ -192,6 +216,12 @@
       drawNeonWaves(document.getElementById('vuE'));
       drawSpectrum3D(document.getElementById('vuF'));
       drawStatic3D(document.getElementById('vuG'));
+      drawSpectrogram(document.getElementById('vuH'));
+      drawParticles(document.getElementById('vuI'));
+      drawTerrain(document.getElementById('vuJ'));
+      drawAurora(document.getElementById('vuK'));
+      drawMatrixRain(document.getElementById('vuL'));
+      drawRainbowMesh(document.getElementById('vuM'));
     }
 
     // ============================================================
@@ -921,6 +951,389 @@
       ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
       ctx.lineWidth = 1;
       ctx.stroke();
+    }
+
+    // ============================================================
+    // H — Spectrogram (scrolling heat-map waterfall)
+    // ============================================================
+    // Magma-like color palette (precomputed)
+    const spectrogramPalette = [];
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255;
+      let r, g, b;
+      if (t < 0.33) {
+        const s = t / 0.33;
+        r = Math.round(s * 120);
+        g = 0;
+        b = Math.round(s * 160);
+      } else if (t < 0.66) {
+        const s = (t - 0.33) / 0.33;
+        r = Math.round(120 + s * 135);
+        g = Math.round(s * 80);
+        b = Math.round(160 - s * 100);
+      } else {
+        const s = (t - 0.66) / 0.34;
+        r = 255;
+        g = Math.round(80 + s * 175);
+        b = Math.round(60 - s * 60 + s * 100);
+      }
+      spectrogramPalette.push(`rgb(${r},${g},${b})`);
+    }
+    let spectrogramInit = false;
+
+    function drawSpectrogram(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      if (!spectrogramInit) {
+        ctx.fillStyle = darkMode ? '#000' : '#f0f0f0';
+        ctx.fillRect(0, 0, w, h);
+        spectrogramInit = true;
+      }
+
+      // Shift existing image left by 2px
+      const imageData = ctx.getImageData(2, 0, w - 2, h);
+      ctx.putImageData(imageData, 0, 0);
+
+      // Draw new column on the right edge
+      const bins = Math.min(bufferLength, 128);
+      const binH = h / bins;
+      for (let i = 0; i < bins; i++) {
+        const val = dataArray[i];
+        ctx.fillStyle = val > 5 ? spectrogramPalette[val] : (darkMode ? '#000' : '#f0f0f0');
+        // Low frequencies at bottom, high at top
+        ctx.fillRect(w - 2, h - (i + 1) * binH, 2, binH);
+      }
+    }
+
+    // ============================================================
+    // I — Particles (audio-reactive fountain)
+    // ============================================================
+    const particles = [];
+    const MAX_PARTICLES = 400;
+
+    function drawParticles(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Fade trail instead of full clear
+      ctx.fillStyle = darkMode ? 'rgba(0,0,0,0.12)' : 'rgba(245,245,245,0.15)';
+      ctx.fillRect(0, 0, w, h);
+
+      // Compute energy bands
+      const bassEnergy = avgBand(0, 8) / 255;
+      const midEnergy = avgBand(8, 40) / 255;
+      const trebleEnergy = avgBand(40, 80) / 255;
+      const totalEnergy = (bassEnergy + midEnergy + trebleEnergy) / 3;
+
+      // Spawn particles proportional to energy
+      const spawnCount = Math.floor(totalEnergy * 15);
+      for (let s = 0; s < spawnCount && particles.length < MAX_PARTICLES; s++) {
+        const isBass = Math.random() < 0.4;
+        particles.push({
+          x: w / 2 + (Math.random() - 0.5) * 60,
+          y: h * 0.85,
+          vx: (Math.random() - 0.5) * (isBass ? 3 : 6),
+          vy: -(2 + Math.random() * 4 + totalEnergy * 4),
+          life: 1,
+          decay: 0.01 + Math.random() * 0.02,
+          size: isBass ? 3 + bassEnergy * 5 : 1 + trebleEnergy * 3,
+          hue: isBass ? 10 + Math.random() * 30 : 180 + Math.random() * 120,
+        });
+      }
+
+      // Update and draw
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.08; // gravity
+        p.life -= p.decay;
+
+        if (p.life <= 0 || p.y > h) {
+          particles.splice(i, 1);
+          continue;
+        }
+
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = `hsl(${p.hue}, 90%, 60%)`;
+        ctx.shadowColor = `hsl(${p.hue}, 90%, 60%)`;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+    }
+
+    function avgBand(start, end) {
+      let sum = 0;
+      const e = Math.min(end, bufferLength);
+      for (let i = start; i < e; i++) sum += dataArray[i];
+      return sum / (e - start);
+    }
+
+    // ============================================================
+    // J — Terrain (Joy Division "Unknown Pleasures" style)
+    // ============================================================
+    const terrainHistory = [];
+    const TERRAIN_ROWS = 35;
+
+    function drawTerrain(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#000' : '#f5f5f5';
+      ctx.fillRect(0, 0, w, h);
+
+      // Store current spectrum
+      const bins = Math.min(bufferLength, 100);
+      const frame = new Float32Array(bins);
+      for (let i = 0; i < bins; i++) frame[i] = dataArray[i] / 255;
+      terrainHistory.unshift(frame);
+      if (terrainHistory.length > TERRAIN_ROWS) terrainHistory.pop();
+
+      const rowSpacing = h * 0.6 / TERRAIN_ROWS;
+      const startY = h * 0.15;
+      const padX = w * 0.08;
+      const lineColor = darkMode ? '#fff' : '#000';
+      const bgColor = darkMode ? '#000' : '#f5f5f5';
+
+      // Draw back to front
+      for (let row = terrainHistory.length - 1; row >= 0; row--) {
+        const data = terrainHistory[row];
+        const baseY = startY + row * rowSpacing;
+        const amplitude = 40 + (1 - row / TERRAIN_ROWS) * 20;
+
+        ctx.beginPath();
+        ctx.moveTo(padX, baseY);
+
+        for (let i = 0; i < bins; i++) {
+          const x = padX + (i / (bins - 1)) * (w - padX * 2);
+          const y = baseY - data[i] * amplitude;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+
+        // Close the path below for occlusion fill
+        ctx.lineTo(w - padX, baseY + rowSpacing);
+        ctx.lineTo(padX, baseY + rowSpacing);
+        ctx.closePath();
+
+        ctx.fillStyle = bgColor;
+        ctx.fill();
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+    }
+
+    // ============================================================
+    // K — Aurora Borealis (layered glowing ribbons)
+    // ============================================================
+    let auroraTime = 0;
+    const auroraBands = [
+      { r: 0, g: 220, b: 100, speed: 0.8, freq: 2.5 },
+      { r: 50, g: 180, b: 255, speed: 1.1, freq: 3.0 },
+      { r: 100, g: 50, b: 255, speed: 0.6, freq: 2.0 },
+      { r: 0, g: 255, b: 180, speed: 1.4, freq: 3.5 },
+      { r: 200, g: 50, b: 200, speed: 0.9, freq: 2.8 },
+    ];
+
+    function drawAurora(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#020810' : '#e8eef5';
+      ctx.fillRect(0, 0, w, h);
+
+      auroraTime += 0.015;
+
+      ctx.globalCompositeOperation = darkMode ? 'lighter' : 'multiply';
+
+      for (let b = 0; b < auroraBands.length; b++) {
+        const band = auroraBands[b];
+        const binStart = Math.floor((b / auroraBands.length) * bufferLength * 0.6);
+        const binEnd = Math.floor(((b + 1) / auroraBands.length) * bufferLength * 0.6);
+
+        let energy = 0;
+        for (let i = binStart; i < binEnd; i++) energy += dataArray[i];
+        energy = (energy / ((binEnd - binStart) * 255));
+
+        const baseY = h * 0.2 + (b / auroraBands.length) * h * 0.5;
+        const ribbonH = 20 + energy * h * 0.25;
+
+        ctx.beginPath();
+        ctx.moveTo(0, baseY);
+
+        const points = 50;
+        for (let i = 0; i <= points; i++) {
+          const t = i / points;
+          const x = t * w;
+          const wave1 = Math.sin(t * Math.PI * band.freq + auroraTime * band.speed) * ribbonH;
+          const wave2 = Math.sin(t * Math.PI * 1.5 + auroraTime * 0.7 + b) * ribbonH * 0.4;
+          const y = baseY + wave1 + wave2;
+          ctx.lineTo(x, y);
+        }
+
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+
+        const alpha = 0.15 + energy * 0.25;
+        const col = darkMode
+          ? `rgba(${band.r},${band.g},${band.b},${alpha})`
+          : `rgba(${Math.round(band.r * 0.7)},${Math.round(band.g * 0.7)},${Math.round(band.b * 0.7)},${alpha * 0.8})`;
+        ctx.fillStyle = col;
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+
+      // Subtle stars in dark mode
+      if (darkMode) {
+        for (let i = 0; i < 3; i++) {
+          const sx = Math.random() * w;
+          const sy = Math.random() * h * 0.4;
+          ctx.fillStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.4})`;
+          ctx.fillRect(sx, sy, 1, 1);
+        }
+      }
+    }
+
+    // ============================================================
+    // L — Matrix Rain (audio-reactive digital rain)
+    // ============================================================
+    const matrixColumns = [];
+    let matrixInit = false;
+    const matrixChars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
+
+    function drawMatrixRain(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      const fontSize = 14;
+      const cols = Math.floor(w / fontSize);
+
+      if (!matrixInit) {
+        for (let i = 0; i < cols; i++) {
+          matrixColumns.push({
+            y: Math.random() * h,
+            speed: 1 + Math.random() * 3,
+            bin: Math.floor((i / cols) * Math.min(bufferLength, 64)),
+          });
+        }
+        matrixInit = true;
+      }
+
+      // Fade effect
+      ctx.fillStyle = darkMode ? 'rgba(0,0,0,0.06)' : 'rgba(245,245,245,0.08)';
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.font = `${fontSize}px monospace`;
+
+      for (let i = 0; i < matrixColumns.length; i++) {
+        const col = matrixColumns[i];
+        const energy = (dataArray[col.bin] || 0) / 255;
+
+        // Speed driven by audio
+        col.y += col.speed * (0.5 + energy * 3);
+
+        if (col.y > h) {
+          col.y = -fontSize;
+          col.speed = 1 + Math.random() * 3;
+        }
+
+        const char = matrixChars[Math.floor(Math.random() * matrixChars.length)];
+
+        // Head character (bright)
+        const brightness = 0.6 + energy * 0.4;
+        if (darkMode) {
+          ctx.fillStyle = `rgba(0,255,70,${brightness})`;
+          ctx.shadowColor = 'rgba(0,255,70,0.6)';
+        } else {
+          ctx.fillStyle = `rgba(0,140,40,${brightness})`;
+          ctx.shadowColor = 'rgba(0,140,40,0.4)';
+        }
+        ctx.shadowBlur = energy > 0.3 ? 8 : 0;
+        ctx.fillText(char, i * fontSize, col.y);
+      }
+
+      ctx.shadowBlur = 0;
+    }
+
+    // ============================================================
+    // M — Rainbow Mesh (layered colored waveform ribbons with depth)
+    // ============================================================
+    const meshHistory = [];
+    const MESH_LAYERS = 28;
+    let meshFrame = 0;
+
+    function drawRainbowMesh(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#000' : '#f0f0f0';
+      ctx.fillRect(0, 0, w, h);
+
+      const bins = Math.min(bufferLength, 80);
+
+      // Store snapshot every 2 frames
+      meshFrame++;
+      if (meshFrame % 2 === 0) {
+        const frame = new Float32Array(bins);
+        for (let i = 0; i < bins; i++) frame[i] = dataArray[i] / 255;
+        meshHistory.unshift(frame);
+        if (meshHistory.length > MESH_LAYERS) meshHistory.pop();
+      }
+
+      const padX = w * 0.05;
+      const usableW = w - padX * 2;
+      const centerY = h * 0.5;
+
+      // Draw back to front — each layer is a waveform line at a slightly different vertical offset
+      for (let layer = meshHistory.length - 1; layer >= 0; layer--) {
+        const frame = meshHistory[layer];
+        const depth = layer / MESH_LAYERS; // 0 = front (newest), 1 = back (oldest)
+        const fade = 0.2 + (1 - depth) * 0.8;
+
+        // Each layer shifts slightly up and to the side for the 3D ribbon feel
+        const offsetY = (depth - 0.5) * h * 0.6;
+        const offsetX = (depth - 0.5) * w * 0.15;
+
+        // Rainbow hue shifts across layers
+        const hue = (layer / MESH_LAYERS) * 300;
+
+        ctx.beginPath();
+
+        for (let i = 0; i < bins; i++) {
+          const t = i / (bins - 1);
+          const x = padX + offsetX + t * usableW;
+          const amplitude = frame[i] * h * 0.25;
+          const y = centerY + offsetY - amplitude;
+
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+
+        ctx.strokeStyle = darkMode
+          ? `hsla(${hue}, 90%, 60%, ${fade})`
+          : `hsla(${hue}, 80%, 45%, ${fade * 0.9})`;
+        ctx.lineWidth = 1.5;
+        ctx.shadowColor = darkMode ? `hsla(${hue}, 100%, 50%, ${fade * 0.4})` : 'transparent';
+        ctx.shadowBlur = darkMode ? 6 : 0;
+        ctx.stroke();
+      }
+
+      ctx.shadowBlur = 0;
     }
   </script>
 </body>
