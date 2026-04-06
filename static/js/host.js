@@ -975,6 +975,13 @@ socket.on('room_created', (data) => {
   }
 
   showScreen(waitingScreen);
+
+  // Pre-acquire mic access so it's ready when the game starts
+  if (micVisualizerEnabled && !micStream) {
+    setupMicVisualization().then(() => {
+      stopVisualization(); // Stop drawing, just keep the stream ready
+    });
+  }
 });
 
 socket.on('participant_joined', (data) => {
@@ -1372,8 +1379,14 @@ function displayQuestion(data) {
     attemptPlayback();
 
     audioAvailable = true;
-    // Start enhanced simulated visualization with track data
-    startVisualizerAnimation(data.track_name);
+    // Use mic visualization if enabled, otherwise simulated
+    if (micVisualizerEnabled) {
+      setupMicVisualization().then(ok => {
+        if (!ok) startVisualizerAnimation();
+      });
+    } else {
+      startVisualizerAnimation();
+    }
   } else if (data.preview_url) {
     // Fall back to preview URL
     console.log('Using preview URL');
@@ -1708,6 +1721,40 @@ let dataArray;
 let bufferLength;
 let animationId;
 let animationRunning = false;
+let visualizerStyle = 'bars-light';
+const VISUALIZER_STYLES = [
+  'vintage-dark', 'vintage-light',
+  'flat-dark', 'flat-light',
+  'rainbow-dark', 'rainbow-light',
+  'neon-dark', 'neon-light',
+  'spectrum3d-dark', 'spectrum3d-light',
+  'bars-dark', 'bars-light',
+  'mirror-dark', 'mirror-light',
+  'led-dark', 'led-light',
+];
+
+// Neon Waves state
+const waveColors = [
+  { r: 0, g: 200, b: 255 },
+  { r: 150, g: 50, b: 255 },
+  { r: 255, g: 50, b: 150 },
+  { r: 50, g: 255, b: 200 },
+];
+const WAVE_LAYERS = 4;
+let waveTime = 0;
+
+// 3D Spectrum state
+const spectrumHistory = [];
+const HISTORY_DEPTH = 20;
+let spectrumFrame = 0;
+
+// Microphone visualization
+let micStream = null;
+let micSource = null;
+let micGainNode = null;
+let micAnalyser = null;
+let micVisualizerEnabled = false;
+let micGainValue = 4;
 
 function setupAudioVisualization() {
   const canvas = document.getElementById('audioVisualizer');
@@ -1733,14 +1780,14 @@ function setupAudioVisualization() {
   visualize(canvas, canvasCtx);
 }
 
-function startVisualizerAnimation(trackName) {
+function startVisualizerAnimation() {
   // For Spotify SDK playback, create an enhanced simulated animation
   const canvas = document.getElementById('audioVisualizer');
   if (!canvas) return;
 
   const canvasCtx = canvas.getContext('2d');
   animationRunning = true;
-  simulatedVisualize(canvas, canvasCtx, trackName);
+  simulatedVisualize(canvas, canvasCtx);
 }
 
 function resizeCanvas(canvas) {
@@ -1751,6 +1798,21 @@ function resizeCanvas(canvas) {
     canvas.height = displayHeight;
   }
 }
+
+// Cycle visualizer on canvas click
+(function() {
+  const c = document.getElementById('audioVisualizer');
+  if (c) {
+    c.style.cursor = 'pointer';
+    c.addEventListener('click', () => {
+      const idx = VISUALIZER_STYLES.indexOf(visualizerStyle);
+      visualizerStyle = VISUALIZER_STYLES[(idx + 1) % VISUALIZER_STYLES.length];
+      const sel = document.getElementById('settingVisualizerStyle');
+      if (sel) sel.value = visualizerStyle;
+      if (userSettings) userSettings.visualizer_style = visualizerStyle;
+    });
+  }
+})();
 
 function visualize(canvas, canvasCtx) {
   if (!analyser) return;
@@ -1764,51 +1826,615 @@ function visualize(canvas, canvasCtx) {
     resizeCanvas(canvas);
     analyser.getByteFrequencyData(dataArray);
 
-    // Clear canvas with background matching theme
-    const isDarkMode = document.documentElement.classList.contains('dark');
-    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const barWidth = (canvas.width / bufferLength) * 2.5;
-    let barHeight;
-    let x = 0;
-
-    for (let i = 0; i < bufferLength; i++) {
-      barHeight = (dataArray[i] / 255) * canvas.height;
-
-      // Solid primary color bars
-      canvasCtx.fillStyle = '#667eea';
-      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-
-      x += barWidth + 1;
-    }
+    const isDark = visualizerStyle.endsWith('-dark');
+    dispatchDraw(canvas, canvasCtx, isDark);
   }
 
   draw();
 }
 
-function simulatedVisualize(canvas, canvasCtx, trackName) {
+function dispatchDraw(canvas, ctx, isDark) {
+  const base = visualizerStyle.replace(/-dark$|-light$/, '');
+  switch (base) {
+    case 'vintage': drawVintageVU(canvas, ctx, isDark); break;
+    case 'flat': drawFlatBars(canvas, ctx, isDark); break;
+    case 'rainbow': drawRainbowEq(canvas, ctx, isDark); break;
+    case 'neon': drawNeonWaves(canvas, ctx, isDark); break;
+    case 'spectrum3d': drawSpectrum3D(canvas, ctx, isDark); break;
+    case 'bars': drawBars(canvas, ctx, isDark); break;
+    case 'mirror': drawMirror(canvas, ctx, isDark); break;
+    case 'led': drawLedBars(canvas, ctx, isDark); break;
+    default: drawVintageVU(canvas, ctx, true);
+  }
+}
+
+// ===== Helper: compute L/R levels from dataArray =====
+// Uses RMS of the most energetic frequency bins (lower half)
+// rather than averaging all bins — much more sensitive and realistic.
+function getLevelsFromData() {
+  // Only use lower half of spectrum where most audio energy lives
+  const useBins = Math.max(8, Math.floor(bufferLength * 0.5));
+  let sumSq = 0;
+  for (let i = 0; i < useBins; i++) {
+    const v = dataArray[i] / 255;
+    sumSq += v * v;
+  }
+  const rms = Math.sqrt(sumSq / useBins);
+  // RMS of 0..1 range tends to be low, scale up for better needle movement
+  const level = Math.min(1, rms * 1.2);
+  return {
+    l: Math.min(1, level * (0.97 + Math.random() * 0.06)),
+    r: Math.min(1, level * (0.97 + Math.random() * 0.06)),
+  };
+}
+
+// ===== A: Vintage VU Meter =====
+function dbToArcPosition(db) {
+  const map = [
+    [-20, 0.00], [-10, 0.20], [-7, 0.30], [-5, 0.40],
+    [-3, 0.50], [-2, 0.57], [-1, 0.64], [0, 0.72],
+    [1, 0.81], [2, 0.90], [3, 1.00]
+  ];
+  if (db <= map[0][0]) return map[0][1];
+  if (db >= map[map.length - 1][0]) return map[map.length - 1][1];
+  for (let i = 0; i < map.length - 1; i++) {
+    if (db >= map[i][0] && db <= map[i + 1][0]) {
+      const frac = (db - map[i][0]) / (map[i + 1][0] - map[i][0]);
+      return map[i][1] + frac * (map[i + 1][1] - map[i][1]);
+    }
+  }
+  return 0;
+}
+
+function drawVintageVU(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.fillStyle = isDark ? '#1a1a1a' : '#888';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = isDark ? '#2a2a2a' : '#999';
+  ctx.fillRect(4, 4, w - 8, h - 8);
+
+  const { l, r } = getLevelsFromData();
+  const meterW = (w - 30) / 2;
+  const meterH = h - 20;
+  drawVintageGauge(ctx, 10, 10, meterW, meterH, l, 'L');
+  drawVintageGauge(ctx, meterW + 20, 10, meterW, meterH, r, 'R');
+}
+
+function drawVintageGauge(ctx, ox, oy, w, h, level, label) {
+  const grad = ctx.createLinearGradient(ox, oy, ox, oy + h);
+  grad.addColorStop(0, '#f5ecd0');
+  grad.addColorStop(0.5, '#f8f1dc');
+  grad.addColorStop(1, '#ece3c8');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(ox, oy, w, h, 4);
+  ctx.fill();
+  ctx.strokeStyle = '#8a7e6a';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const cx = ox + w / 2;
+  const cy = oy + h + h * 0.55;
+  const radius = h * 1.3;
+  const startAngle = Math.PI * 1.28;
+  const endAngle = Math.PI * 1.72;
+  const arcRange = endAngle - startAngle;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(ox + 1, oy + 1, w - 2, h - 2, 4);
+  ctx.clip();
+
+  // VU label
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${Math.max(12, h * 0.13)}px serif`;
+  ctx.fillStyle = '#333';
+  ctx.fillText('VU', cx, oy + h * 0.82);
+
+  // dB scale
+  const dbTicks = [
+    { db: -20, label: '20' }, { db: -10, label: '10' },
+    { db: -7, label: '7' }, { db: -5, label: '5' },
+    { db: -3, label: '3' }, { db: -2, label: '2' },
+    { db: -1, label: '1' }, { db: 0, label: '0' },
+    { db: 1, label: '1' }, { db: 2, label: '2' }, { db: 3, label: '3' }
+  ];
+  ctx.font = `bold ${Math.max(10, Math.min(15, w * 0.045))}px sans-serif`;
+
+  for (const tick of dbTicks) {
+    const t = dbToArcPosition(tick.db);
+    const angle = startAngle + t * arcRange;
+    const isRed = tick.db >= 0;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle) * radius * 0.90, cy + Math.sin(angle) * radius * 0.90);
+    ctx.lineTo(cx + Math.cos(angle) * radius * 0.96, cy + Math.sin(angle) * radius * 0.96);
+    ctx.strokeStyle = isRed ? '#c02316' : '#333';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = isRed ? '#c02316' : '#333';
+    ctx.fillText(tick.label, cx + Math.cos(angle) * radius * 0.83, cy + Math.sin(angle) * radius * 0.83);
+  }
+
+  // Minor ticks
+  for (let i = 0; i < dbTicks.length - 1; i++) {
+    const tMid = (dbToArcPosition(dbTicks[i].db) + dbToArcPosition(dbTicks[i + 1].db)) / 2;
+    const angle = startAngle + tMid * arcRange;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle) * radius * 0.93, cy + Math.sin(angle) * radius * 0.93);
+    ctx.lineTo(cx + Math.cos(angle) * radius * 0.96, cy + Math.sin(angle) * radius * 0.96);
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+  }
+
+  // Arcs
+  const zeroAngle = startAngle + dbToArcPosition(0) * arcRange;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, startAngle, zeroAngle, false);
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, zeroAngle, endAngle, false);
+  ctx.strokeStyle = '#c02316';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Percentage scale
+  const pctTicks = [
+    { pct: 0, label: '0' }, { pct: 20, label: '20' }, { pct: 40, label: '40' },
+    { pct: 60, label: '60' }, { pct: 80, label: '80' }, { pct: 100, label: '100' }
+  ];
+  ctx.font = `${Math.max(7, Math.min(9, w * 0.025))}px sans-serif`;
+  ctx.fillStyle = '#999';
+  for (const tick of pctTicks) {
+    const db = -20 + (tick.pct / 100) * 20;
+    const t = dbToArcPosition(db);
+    const angle = startAngle + t * arcRange;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle) * radius * 1.01, cy + Math.sin(angle) * radius * 1.01);
+    ctx.lineTo(cx + Math.cos(angle) * radius * 1.03, cy + Math.sin(angle) * radius * 1.03);
+    ctx.strokeStyle = '#bbb';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    ctx.fillText(tick.label, cx + Math.cos(angle) * radius * 1.06, cy + Math.sin(angle) * radius * 1.06);
+  }
+
+  // Needle
+  const db = -20 + level * 23;
+  const needleAngle = startAngle + dbToArcPosition(db) * arcRange;
+  ctx.beginPath();
+  ctx.moveTo(cx + 1, cy + 1);
+  ctx.lineTo(cx + Math.cos(needleAngle) * radius * 0.97 + 1, cy + Math.sin(needleAngle) * radius * 0.97 + 1);
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(needleAngle) * radius * 0.97, cy + Math.sin(needleAngle) * radius * 0.97);
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  ctx.restore();
+
+  // Screw
+  ctx.beginPath();
+  ctx.arc(ox + w - 14, oy + 14, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#c0b8a0';
+  ctx.fill();
+  ctx.strokeStyle = '#a09880';
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ox + w - 17, oy + 14);
+  ctx.lineTo(ox + w - 11, oy + 14);
+  ctx.strokeStyle = '#998e78';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// ===== C: Flat Bars =====
+function drawFlatBars(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.fillStyle = isDark ? '#111827' : '#f0f0f0';
+  ctx.fillRect(0, 0, w, h);
+
+  const { l, r } = getLevelsFromData();
+  const padL = 30;
+  const padR = 65;
+  const barW = w - padL - padR;
+  const barH = Math.min(30, h * 0.22);
+  const barY1 = h * 0.18;
+  const barY2 = h * 0.52;
+
+  drawFlatBarSingle(ctx, padL, barY1, barW, barH, l, 'L', isDark);
+  drawFlatBarSingle(ctx, padL, barY2, barW, barH, r, 'R', isDark);
+
+  // dB scale
+  ctx.textAlign = 'center';
+  ctx.font = `${Math.max(8, h * 0.07)}px monospace`;
+  ctx.fillStyle = '#666';
+  const dbMarks = [-20, -15, -10, -7, -5, -3, -1, 0, 1, 2, 3];
+  for (const db of dbMarks) {
+    const t = (db + 20) / 23;
+    const x = padL + t * barW;
+    ctx.fillText(db.toString(), x, h * 0.88);
+    ctx.beginPath();
+    ctx.moveTo(x, h * 0.80);
+    ctx.lineTo(x, h * 0.84);
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+function drawFlatBarSingle(ctx, x, y, w, h, level, label, isDark) {
+  ctx.fillStyle = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fill();
+
+  const segments = 46;
+  const segW = (w - (segments - 1) * 2) / segments;
+  const litSegments = Math.round(level * segments);
+
+  for (let i = 0; i < segments; i++) {
+    const sx = x + i * (segW + 2);
+    const isLit = i < litSegments;
+    const t = i / segments;
+    let color;
+    if (t < 0.6) color = isLit ? '#22c55e' : 'rgba(34,197,94,0.12)';
+    else if (t < 0.87) color = isLit ? '#eab308' : 'rgba(234,179,8,0.12)';
+    else color = isLit ? '#ef4444' : 'rgba(239,68,68,0.12)';
+
+    ctx.fillStyle = color;
+    if (isLit) { ctx.shadowColor = color; ctx.shadowBlur = 4; }
+    else { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; }
+    ctx.fillRect(sx, y, segW, h);
+  }
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 14px monospace';
+  ctx.fillStyle = '#888';
+  ctx.fillText(label, x - 8, y + h / 2 + 5);
+
+  const db = Math.round(-20 + level * 23);
+  ctx.textAlign = 'left';
+  ctx.font = '12px monospace';
+  ctx.fillStyle = level > 0.87 ? '#ef4444' : '#888';
+  ctx.fillText(`${db}dB`, x + w + 8, y + h / 2 + 4);
+}
+
+// ===== D: Rainbow Equalizer =====
+function drawRainbowEq(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.fillStyle = isDark ? '#000' : '#f8f8f8';
+  ctx.fillRect(0, 0, w, h);
+
+  const bars = Math.min(bufferLength, 32);
+  const midY = h * 0.6;
+  const blockGap = 2;
+  const barGap = 3;
+  const barWidth = (w - barGap * (bars + 1)) / bars;
+  const maxBlocks = 14;
+  const blockH = (midY - maxBlocks * blockGap) / maxBlocks;
+
+  for (let i = 0; i < bars; i++) {
+    const value = dataArray[i] / 255;
+    const litBlocks = Math.round(value * maxBlocks);
+    const x = barGap + i * (barWidth + barGap);
+    const hue = (i / bars) * 300;
+
+    for (let j = 0; j < maxBlocks; j++) {
+      const isLit = j < litBlocks;
+      const y = midY - (j + 1) * (blockH + blockGap);
+
+      if (isLit) {
+        ctx.shadowColor = `hsl(${hue}, 100%, 60%)`;
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = `hsl(${hue}, 90%, ${55 + j * 2}%)`;
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = isDark ? `hsla(${hue}, 40%, 15%, 0.4)` : `hsla(${hue}, 30%, 85%, 0.5)`;
+      }
+      ctx.fillRect(x, y, barWidth, blockH);
+
+      if (isLit) {
+        const ry = midY + j * (blockH + blockGap) + blockGap;
+        const fade = 0.35 - (j / maxBlocks) * 0.3;
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = `hsla(${hue}, 80%, 50%, ${fade})`;
+        ctx.fillRect(x, ry, barWidth, blockH);
+      }
+    }
+  }
+  ctx.shadowBlur = 0;
+
+  const reflBg = isDark ? '0,0,0' : '248,248,248';
+  const reflGrad = ctx.createLinearGradient(0, midY, 0, h);
+  reflGrad.addColorStop(0, `rgba(${reflBg},0)`);
+  reflGrad.addColorStop(1, `rgba(${reflBg},0.85)`);
+  ctx.fillStyle = reflGrad;
+  ctx.fillRect(0, midY, w, h - midY);
+}
+
+// ===== E: Neon Waves =====
+function drawNeonWaves(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const midY = h * 0.45;
+  ctx.fillStyle = isDark ? '#050515' : '#f5f5ff';
+  ctx.fillRect(0, 0, w, h);
+
+  waveTime += 0.02;
+
+  for (let layer = 0; layer < WAVE_LAYERS; layer++) {
+    const c = waveColors[layer];
+    const baseAlpha = 0.6 + layer * 0.1;
+    const phaseOffset = layer * 1.3;
+    const freqMult = 1 + layer * 0.3;
+    const ampScale = 0.7 + layer * 0.1;
+
+    const points = [];
+    const segments = 100;
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const x = t * w;
+      const dataIdx = Math.floor(t * Math.min(bufferLength, 64));
+      const freqValue = (dataArray[dataIdx] || 0) / 255;
+      const wave = Math.sin(t * Math.PI * 3 * freqMult + waveTime + phaseOffset) * freqValue * ampScale;
+      const wave2 = Math.sin(t * Math.PI * 5 + waveTime * 1.3 + phaseOffset) * freqValue * 0.3;
+      points.push({ x, y: midY + (wave + wave2) * midY * 0.7 });
+    }
+
+    for (let glow = 3; glow >= 0; glow--) {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length - 1; i++) {
+        const cpx = (points[i].x + points[i + 1].x) / 2;
+        const cpy = (points[i].y + points[i + 1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, cpx, cpy);
+      }
+      const alpha = glow === 0 ? baseAlpha : baseAlpha * 0.15 / (glow * 0.5);
+      ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${alpha})`;
+      ctx.lineWidth = glow === 0 ? 2 : glow * 6 + 2;
+      ctx.shadowColor = glow === 0 ? `rgba(${c.r},${c.g},${c.b},0.5)` : 'transparent';
+      ctx.shadowBlur = glow === 0 ? 10 : 0;
+      ctx.stroke();
+    }
+
+    // Reflection
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, midY + (midY - points[0].y));
+    for (let i = 1; i < points.length - 1; i++) {
+      const ry = midY + (midY - points[i].y);
+      const rny = midY + (midY - points[i + 1].y);
+      ctx.quadraticCurveTo(points[i].x, ry, (points[i].x + points[i + 1].x) / 2, (ry + rny) / 2);
+    }
+    ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${baseAlpha * 0.15})`;
+    ctx.lineWidth = 1.5;
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+
+  const neonBg = isDark ? '5,5,21' : '245,245,255';
+  const neonGrad = ctx.createLinearGradient(0, midY, 0, h);
+  neonGrad.addColorStop(0, `rgba(${neonBg},0)`);
+  neonGrad.addColorStop(0.6, `rgba(${neonBg},0.7)`);
+  neonGrad.addColorStop(1, `rgba(${neonBg},0.95)`);
+  ctx.fillStyle = neonGrad;
+  ctx.fillRect(0, midY, w, h - midY);
+}
+
+// ===== F: 3D Spectrum =====
+function drawSpectrum3D(canvas, ctx, isDark) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.fillStyle = isDark ? '#000' : '#f0f0f0';
+  ctx.fillRect(0, 0, w, h);
+
+  const bars = Math.min(bufferLength, 32);
+  spectrumFrame++;
+  if (spectrumFrame % 3 === 0) {
+    const frame = new Uint8Array(bars);
+    for (let i = 0; i < bars; i++) frame[i] = dataArray[i];
+    spectrumHistory.unshift(frame);
+    if (spectrumHistory.length > HISTORY_DEPTH) spectrumHistory.pop();
+  }
+
+  const baseX = w * 0.08;
+  const baseY = h * 0.88;
+  const barW = (w * 0.65) / bars;
+  const barGap = 1;
+  const zStepX = 8;
+  const zStepY = -8;
+  const maxBarH = h * 0.5;
+
+  for (let z = spectrumHistory.length - 1; z >= 0; z--) {
+    const frame = spectrumHistory[z];
+    const fade = 0.25 + ((spectrumHistory.length - 1 - z) / HISTORY_DEPTH) * 0.75;
+    const rowX = baseX + z * zStepX;
+    const rowY = baseY + z * zStepY;
+
+    for (let i = 0; i < bars; i++) {
+      const value = frame[i] / 255;
+      const barH = value * maxBarH;
+      if (barH < 1) continue;
+
+      const x = rowX + i * (barW + barGap);
+      const topY = rowY - barH;
+      const hue = (i / bars) * 300;
+      const sat = 80;
+      const lit = 40 + value * 25;
+
+      ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit}%, ${fade})`;
+      ctx.fillRect(x, topY, barW, barH);
+
+      ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit + 15}%, ${fade * 0.7})`;
+      ctx.beginPath();
+      ctx.moveTo(x, topY);
+      ctx.lineTo(x + zStepX, topY + zStepY);
+      ctx.lineTo(x + barW + zStepX, topY + zStepY);
+      ctx.lineTo(x + barW, topY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit - 12}%, ${fade * 0.5})`;
+      ctx.beginPath();
+      ctx.moveTo(x + barW, topY);
+      ctx.lineTo(x + barW + zStepX, topY + zStepY);
+      ctx.lineTo(x + barW + zStepX, rowY + zStepY);
+      ctx.lineTo(x + barW, rowY);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.06)';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= bars; i += 4) {
+    const x = baseX + i * (barW + barGap);
+    ctx.beginPath();
+    ctx.moveTo(x, baseY);
+    ctx.lineTo(x + HISTORY_DEPTH * zStepX, baseY + HISTORY_DEPTH * zStepY);
+    ctx.stroke();
+  }
+  for (let z = 0; z <= HISTORY_DEPTH; z += 4) {
+    ctx.beginPath();
+    ctx.moveTo(baseX + z * zStepX, baseY + z * zStepY);
+    ctx.lineTo(baseX + bars * (barW + barGap) + z * zStepX, baseY + z * zStepY);
+    ctx.stroke();
+  }
+}
+
+// ===== Classic: Simple Bars =====
+function drawBars(canvas, ctx, isDark) {
+  ctx.fillStyle = isDark ? '#1f2937' : '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const barWidth = (canvas.width / bufferLength) * 2.5;
+  let x = 0;
+  for (let i = 0; i < bufferLength; i++) {
+    const barHeight = (dataArray[i] / 255) * canvas.height;
+    ctx.fillStyle = '#667eea';
+    ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+    x += barWidth + 1;
+  }
+}
+
+// ===== Classic: Mirror =====
+function drawMirror(canvas, ctx, isDark) {
+  ctx.fillStyle = isDark ? '#1f2937' : '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const centerY = h / 2;
+  const bars = Math.min(bufferLength, 64);
+  const barWidth = Math.max(2, (w / bars) - 1);
+
+  for (let i = 0; i < bars; i++) {
+    const value = dataArray[i] / 255;
+    const barHeight = value * centerY * 0.9;
+    const x = (i / bars) * w;
+    const hue = 240 + (i / bars) * 60;
+    const lightness = 55 + value * 20;
+    ctx.fillStyle = `hsl(${hue}, 70%, ${lightness}%)`;
+    ctx.fillRect(x, centerY - barHeight, barWidth, barHeight);
+    ctx.fillRect(x, centerY, barWidth, barHeight);
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(0, centerY);
+  ctx.lineTo(w, centerY);
+  ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// ===== Classic: LED Bars =====
+function drawLedBars(canvas, ctx, isDark) {
+  ctx.fillStyle = isDark ? 'rgb(24,24,24)' : 'rgb(240,240,240)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const bars = Math.min(bufferLength, 32);
+  const boxCount = 12;
+  const gapFraction = 0.3;
+  const barGap = w * 0.008;
+  const barWidth = (w - barGap * (bars + 1)) / bars;
+  const totalBoxGaps = (boxCount + 1) * gapFraction;
+  const boxHeight = h / (boxCount + totalBoxGaps);
+  const boxGap = boxHeight * gapFraction;
+  const greenMax = Math.floor(boxCount * 0.6);
+  const yellowMax = Math.floor(boxCount * 0.8);
+
+  for (let i = 0; i < bars; i++) {
+    const value = dataArray[i] / 255;
+    const litBoxes = Math.round(value * boxCount);
+    const x = barGap + i * (barWidth + barGap);
+
+    for (let j = 0; j < boxCount; j++) {
+      const boxIndex = boxCount - 1 - j;
+      const y = boxGap + j * (boxHeight + boxGap);
+      const isLit = boxIndex < litBoxes;
+
+      let onColor, offColor;
+      if (boxIndex >= yellowMax) {
+        onColor = 'rgba(255,47,30,0.9)';
+        offColor = isDark ? 'rgba(80,15,10,0.3)' : 'rgba(80,15,10,0.15)';
+      } else if (boxIndex >= greenMax) {
+        onColor = 'rgba(255,215,5,0.9)';
+        offColor = isDark ? 'rgba(80,68,2,0.3)' : 'rgba(80,68,2,0.15)';
+      } else {
+        onColor = 'rgba(53,255,30,0.9)';
+        offColor = isDark ? 'rgba(17,80,10,0.3)' : 'rgba(17,80,10,0.15)';
+      }
+
+      if (isLit) { ctx.shadowColor = onColor; ctx.shadowBlur = 6; }
+      else { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; }
+      ctx.fillStyle = isLit ? onColor : offColor;
+      ctx.fillRect(x, y, barWidth, boxHeight);
+    }
+  }
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+}
+
+function simulatedVisualize(canvas, canvasCtx) {
   // Enhanced simulated visualization for Spotify SDK playback
-  const bars = 64;
+  const bars = 128;
   const barValues = new Array(bars).fill(0);
   const targetValues = new Array(bars).fill(0);
+  // Ensure dataArray exists for draw functions
+  bufferLength = bars;
+  dataArray = new Uint8Array(bars);
 
-  // Estimate BPM range (most music is 60-180 BPM)
-  const baseBPM = 120 + Math.random() * 40; // Random between 120-160 BPM
-  const beatInterval = (60 / baseBPM) * 1000; // Beat duration in ms
+
+  const baseBPM = 120 + Math.random() * 40;
+  const beatInterval = (60 / baseBPM) * 1000;
 
   let startTime = Date.now();
   let lastBeatTime = startTime;
   let beatPhase = 0;
-  let energy = 0.5; // Energy level 0-1
+  let energy = 0.5;
   let targetEnergy = 0.5;
 
-  // Get playback position for progress-based patterns
   async function getPlaybackState() {
     if (!spotifyPlayer) return null;
     try {
-      const state = await spotifyPlayer.getCurrentState();
-      return state;
+      return await spotifyPlayer.getCurrentState();
     } catch (e) {
       return null;
     }
@@ -1823,67 +2449,44 @@ function simulatedVisualize(canvas, canvasCtx, trackName) {
     const now = Date.now();
     const elapsed = now - startTime;
 
-    // Simulate beat detection with rhythm
     if (now - lastBeatTime >= beatInterval) {
       lastBeatTime = now;
       beatPhase = 1.0;
-      // Vary energy every few beats
       if (Math.random() > 0.7) {
         targetEnergy = 0.3 + Math.random() * 0.6;
       }
     }
 
-    // Beat decay
     beatPhase *= 0.85;
     energy += (targetEnergy - energy) * 0.05;
 
-    // Clear canvas with background matching theme
-    const isDarkMode = document.documentElement.classList.contains('dark');
-    canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const barWidth = canvas.width / bars - 2;
-
-    // Get playback state for progress-based effects
-    if (Math.random() < 0.02) { // Check occasionally to avoid performance hit
+    if (Math.random() < 0.02) {
       getPlaybackState().then(state => {
         if (state && state.position && state.duration) {
           const progress = state.position / state.duration;
-          // Use progress to influence visualization intensity
           targetEnergy = 0.3 + progress * 0.4 + Math.random() * 0.3;
         }
       });
     }
 
+    // Generate simulated frequency data into dataArray
     for (let i = 0; i < bars; i++) {
-      // Create frequency-like distribution (lower bars = bass, higher = treble)
-      const freqFactor = 1 - (i / bars) * 0.5; // Bass stronger than treble
-
-      // Multiple sine waves for richer movement
+      const freqFactor = 1 - (i / bars) * 0.5;
       const wave1 = Math.sin(elapsed / 300 + i * 0.15) * 0.15;
       const wave2 = Math.sin(elapsed / 150 + i * 0.08) * 0.1;
       const wave3 = Math.sin(elapsed / 500 + i * 0.25) * 0.08;
-
-      // Beat pulse (affects all bars but more on bass)
       const beatPulse = beatPhase * freqFactor * 0.4;
-
-      // Random variation (less than before)
       const randomVariation = Math.random() * 0.1;
 
-      // Combine all factors with energy
       targetValues[i] = (wave1 + wave2 + wave3 + beatPulse + randomVariation + 0.2) * energy * freqFactor;
       targetValues[i] = Math.max(0.05, Math.min(1, targetValues[i]));
-
-      // Smooth transition
       barValues[i] += (targetValues[i] - barValues[i]) * 0.15;
 
-      const barHeight = barValues[i] * canvas.height;
-      const x = i * (barWidth + 2);
-
-      // Solid primary color bars
-      canvasCtx.fillStyle = '#667eea';
-      canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+      dataArray[i] = Math.round(barValues[i] * 255);
     }
+
+    const isDark = visualizerStyle.endsWith('-dark');
+    dispatchDraw(canvas, canvasCtx, isDark);
   }
 
   draw();
@@ -1902,6 +2505,138 @@ function stopVisualization() {
     const isDarkMode = document.documentElement.classList.contains('dark');
     canvasCtx.fillStyle = isDarkMode ? '#1f2937' : '#ffffff';
     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+async function setupMicVisualization() {
+  const canvas = document.getElementById('audioVisualizer');
+  if (!canvas) return false;
+
+  // Reuse existing mic stream if already active
+  if (micStream && micAnalyser) {
+    const canvasCtx = canvas.getContext('2d');
+    analyser = micAnalyser;
+    bufferLength = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(bufferLength);
+    visualize(canvas, canvasCtx);
+    return true;
+  }
+
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    micSource = audioContext.createMediaStreamSource(micStream);
+
+    // Boost mic signal so the visualizer reacts to ambient audio
+    micGainNode = audioContext.createGain();
+    micGainNode.gain.value = micGainValue;
+
+    micAnalyser = audioContext.createAnalyser();
+    micAnalyser.fftSize = 256;
+    micAnalyser.minDecibels = -80;
+    micAnalyser.maxDecibels = -20;
+    micAnalyser.smoothingTimeConstant = 0.8;
+
+    micSource.connect(micGainNode);
+    micGainNode.connect(micAnalyser);
+    // Do NOT connect to destination — that would cause feedback
+
+    analyser = micAnalyser;
+    bufferLength = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(bufferLength);
+
+    const canvasCtx = canvas.getContext('2d');
+    visualize(canvas, canvasCtx);
+    return true;
+  } catch (err) {
+    console.error('Mic access denied or failed:', err);
+    showNotification('Microphone access denied — using simulated visualizer', 'error');
+    micVisualizerEnabled = false;
+    return false;
+  }
+}
+
+function stopMicVisualization() {
+  if (micStream) {
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+  }
+  if (micSource) {
+    micSource.disconnect();
+    micSource = null;
+  }
+  if (micGainNode) {
+    micGainNode.disconnect();
+    micGainNode = null;
+  }
+  micAnalyser = null;
+}
+
+// Mic level monitor for settings modal
+let micLevelAnimId = null;
+
+function startMicLevelMonitor() {
+  stopMicLevelMonitor();
+  const bar = document.getElementById('micLevelBar');
+  const status = document.getElementById('micLevelStatus');
+  if (!bar || !status) return;
+
+  function update() {
+    micLevelAnimId = requestAnimationFrame(update);
+
+    if (!micAnalyser) {
+      bar.style.width = '0%';
+      status.textContent = 'Off';
+      status.className = 'text-xs text-gray-400';
+      return;
+    }
+
+    const tempData = new Uint8Array(micAnalyser.frequencyBinCount);
+    micAnalyser.getByteFrequencyData(tempData);
+
+    const useBins = Math.max(8, Math.floor(tempData.length * 0.5));
+    let sumSq = 0;
+    for (let i = 0; i < useBins; i++) {
+      const v = tempData[i] / 255;
+      sumSq += v * v;
+    }
+    const rms = Math.sqrt(sumSq / useBins);
+    const pct = Math.min(100, Math.round(rms * 120));
+
+    bar.style.width = pct + '%';
+    if (pct > 60) {
+      bar.className = 'h-full bg-red-500 rounded-full transition-all duration-75';
+      status.textContent = 'High';
+      status.className = 'text-xs text-red-500';
+    } else if (pct > 20) {
+      bar.className = 'h-full bg-green-500 rounded-full transition-all duration-75';
+      status.textContent = 'OK';
+      status.className = 'text-xs text-green-500';
+    } else if (pct > 2) {
+      bar.className = 'h-full bg-yellow-500 rounded-full transition-all duration-75';
+      status.textContent = 'Low';
+      status.className = 'text-xs text-yellow-500';
+    } else {
+      bar.className = 'h-full bg-gray-400 rounded-full transition-all duration-75';
+      status.textContent = 'No signal';
+      status.className = 'text-xs text-gray-400';
+    }
+  }
+
+  update();
+}
+
+function stopMicLevelMonitor() {
+  if (micLevelAnimId) {
+    cancelAnimationFrame(micLevelAnimId);
+    micLevelAnimId = null;
   }
 }
 
@@ -2178,6 +2913,36 @@ function openSettingsModal() {
 
     const autoFullscreen = document.getElementById('settingAutoFullscreen');
     const vibration = document.getElementById('settingVibration');
+    const vizStyle = document.getElementById('settingVisualizerStyle');
+    const micVisualizer = document.getElementById('settingMicVisualizer');
+    const micSensitivity = document.getElementById('settingMicSensitivity');
+    const micSensitivityValue = document.getElementById('micSensitivityValue');
+    const micSensitivitySetting = document.getElementById('micSensitivitySetting');
+
+    // Hide mic visualizer option if getUserMedia is not available
+    const micSetting = document.getElementById('micVisualizerSetting');
+    if (micSetting && !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      micSetting.classList.add('hidden');
+    }
+
+    // Show/hide sensitivity slider based on toggle
+    if (micVisualizer) {
+      micVisualizer.addEventListener('change', () => {
+        if (micSensitivitySetting) {
+          micSensitivitySetting.classList.toggle('hidden', !micVisualizer.checked);
+        }
+      });
+    }
+    if (micSensitivity && micSensitivityValue) {
+      micSensitivity.addEventListener('input', () => {
+        micSensitivityValue.textContent = micSensitivity.value;
+        // Update gain in real-time as you drag
+        micGainValue = parseFloat(micSensitivity.value);
+        if (micGainNode) {
+          micGainNode.gain.value = micGainValue;
+        }
+      });
+    }
 
     if (userSettings) {
       if (gameLength) gameLength.value = userSettings.default_game_length || 10;
@@ -2186,16 +2951,34 @@ function openSettingsModal() {
       if (theme) theme.value = userSettings.theme || localStorage.getItem('theme') || 'light';
       if (vibration) vibration.checked = userSettings.vibration_enabled !== false;
       if (autoFullscreen) autoFullscreen.checked = userSettings.auto_fullscreen === true;
+      if (vizStyle) vizStyle.value = userSettings.visualizer_style || 'bars-light';
+      if (micVisualizer) micVisualizer.checked = userSettings.mic_visualizer === true;
+      if (micSensitivity) micSensitivity.value = userSettings.mic_sensitivity || 4;
+      if (micSensitivityValue) micSensitivityValue.textContent = userSettings.mic_sensitivity || 4;
     } else {
       // Load from localStorage if no server settings
       if (theme) theme.value = localStorage.getItem('theme') || 'light';
       if (vibration) vibration.checked = true;
       if (autoFullscreen) autoFullscreen.checked = false;
+      if (vizStyle) vizStyle.value = 'bars-light';
+      if (micVisualizer) micVisualizer.checked = false;
+      if (micSensitivity) micSensitivity.value = 4;
+    }
+
+    // Sync sensitivity slider visibility
+    if (micSensitivitySetting && micVisualizer) {
+      micSensitivitySetting.classList.toggle('hidden', !micVisualizer.checked);
+    }
+
+    // Start mic level monitor if mic is active
+    if (micAnalyser) {
+      startMicLevelMonitor();
     }
   }
 }
 
 function closeSettingsModal() {
+  stopMicLevelMonitor();
   const modal = document.getElementById('settingsModal');
   if (modal) {
     modal.classList.add('hidden');
@@ -2224,6 +3007,9 @@ async function saveSettings() {
 
   const autoFullscreen = document.getElementById('settingAutoFullscreen');
   const vibration = document.getElementById('settingVibration');
+  const vizStyle = document.getElementById('settingVisualizerStyle');
+  const micVisualizer = document.getElementById('settingMicVisualizer');
+  const micSensitivity = document.getElementById('settingMicSensitivity');
 
   const settings = {
     default_game_length: gameLength ? parseInt(gameLength.value) : 10,
@@ -2232,6 +3018,9 @@ async function saveSettings() {
     theme: theme ? theme.value : 'light',
     vibration_enabled: vibration ? vibration.checked : true,
     auto_fullscreen: autoFullscreen ? autoFullscreen.checked : false,
+    visualizer_style: vizStyle ? vizStyle.value : 'vintage-dark',
+    mic_visualizer: micVisualizer ? micVisualizer.checked : false,
+    mic_sensitivity: micSensitivity ? parseFloat(micSensitivity.value) : 4,
   };
 
   // Always apply settings immediately (don't wait for server)
@@ -2282,7 +3071,19 @@ function applySettings(settings) {
     localStorage.setItem('theme', 'auto');
   }
 
-  // Other settings can be applied as needed
+  // Visualizer style
+  visualizerStyle = settings.visualizer_style || 'bars-light';
+
+  // Mic visualizer
+  const wasMicEnabled = micVisualizerEnabled;
+  micVisualizerEnabled = settings.mic_visualizer === true;
+  micGainValue = settings.mic_sensitivity || 4;
+  if (micGainNode) {
+    micGainNode.gain.value = micGainValue;
+  }
+  if (wasMicEnabled && !micVisualizerEnabled) {
+    stopMicVisualization();
+  }
 }
 
 // Connection resilience handlers

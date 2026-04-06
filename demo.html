@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VU Meter Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 10px; font-size: 1.5rem; }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    button {
+      padding: 10px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      background: #667eea;
+      color: white;
+      font-weight: 600;
+    }
+    button:hover { background: #5a6fd6; }
+    button.active { background: #22c55e; }
+    label { font-size: 0.9rem; }
+    input[type=range] { width: 120px; vertical-align: middle; }
+
+    .demos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 30px;
+      justify-content: center;
+      width: 100%;
+      max-width: 1400px;
+    }
+    .demo-card {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .demo-card h2 {
+      font-size: 1rem;
+      margin-bottom: 10px;
+      color: #aaa;
+    }
+    canvas {
+      display: block;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>VU Meter Styles Demo</h1>
+  <div class="controls">
+    <button id="startBtn">Start Mic</button>
+    <button id="themeBtn">Light Mode</button>
+    <label>Gain: <span id="gainVal">4</span>x</label>
+    <input type="range" id="gainSlider" min="1" max="15" value="4" step="0.5">
+  </div>
+
+  <div class="demos">
+    <div class="demo-card">
+      <h2>A — Vintage (matching reference)</h2>
+      <canvas id="vuA" width="700" height="200"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>B — Minimal</h2>
+      <canvas id="vuB" width="700" height="200"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>C — Modern Flat</h2>
+      <canvas id="vuC" width="700" height="180"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>D — Rainbow Equalizer</h2>
+      <canvas id="vuD" width="700" height="300"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>E — Neon Waves</h2>
+      <canvas id="vuE" width="700" height="280"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>F — 3D Spectrum (with history)</h2>
+      <canvas id="vuF" width="700" height="350"></canvas>
+    </div>
+    <div class="demo-card">
+      <h2>G — 3D Bars (static)</h2>
+      <canvas id="vuG" width="700" height="300"></canvas>
+    </div>
+  </div>
+
+  <script>
+    let audioCtx, analyser, gainNode, micStream;
+    let dataArray, bufferLength;
+    let running = false;
+    let darkMode = true;
+
+    const startBtn = document.getElementById('startBtn');
+    const themeBtn = document.getElementById('themeBtn');
+    const gainSlider = document.getElementById('gainSlider');
+    const gainVal = document.getElementById('gainVal');
+
+    themeBtn.addEventListener('click', () => {
+      darkMode = !darkMode;
+      themeBtn.textContent = darkMode ? 'Light Mode' : 'Dark Mode';
+      document.body.style.background = darkMode ? '#1a1a2e' : '#e8e8e8';
+      document.querySelectorAll('.demo-card').forEach(c => {
+        c.style.background = darkMode ? '#16213e' : '#fff';
+        c.querySelector('h2').style.color = darkMode ? '#aaa' : '#555';
+      });
+    });
+
+    gainSlider.addEventListener('input', () => {
+      gainVal.textContent = gainSlider.value;
+      if (gainNode) gainNode.gain.value = parseFloat(gainSlider.value);
+    });
+
+    startBtn.addEventListener('click', async () => {
+      if (running) {
+        micStream.getTracks().forEach(t => t.stop());
+        running = false;
+        startBtn.textContent = 'Start Mic';
+        startBtn.classList.remove('active');
+        return;
+      }
+
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioCtx.createMediaStreamSource(micStream);
+
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = parseFloat(gainSlider.value);
+
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.minDecibels = -80;
+        analyser.maxDecibels = -20;
+        analyser.smoothingTimeConstant = 0.85;
+
+        source.connect(gainNode);
+        gainNode.connect(analyser);
+
+        bufferLength = analyser.frequencyBinCount;
+        dataArray = new Uint8Array(bufferLength);
+
+        running = true;
+        startBtn.textContent = 'Stop Mic';
+        startBtn.classList.add('active');
+        draw();
+      } catch (e) {
+        alert('Mic access denied: ' + e.message);
+      }
+    });
+
+    function getLevel() {
+      if (!dataArray) return 0;
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+      return (sum / bufferLength) / 255;
+    }
+
+    function draw() {
+      if (!running) return;
+      requestAnimationFrame(draw);
+      analyser.getByteFrequencyData(dataArray);
+
+      // Both channels use the same overall level (mono mic input)
+      // Add slight variation so they're not perfectly identical
+      const level = getLevel();
+      const levelL = Math.min(1, level * (0.97 + Math.random() * 0.06));
+      const levelR = Math.min(1, level * (0.97 + Math.random() * 0.06));
+
+      drawVintage(document.getElementById('vuA'), levelL, levelR);
+      drawMinimal(document.getElementById('vuB'), levelL, levelR);
+      drawModernFlat(document.getElementById('vuC'), levelL, levelR);
+      drawRainbowEq(document.getElementById('vuD'));
+      drawNeonWaves(document.getElementById('vuE'));
+      drawSpectrum3D(document.getElementById('vuF'));
+      drawStatic3D(document.getElementById('vuG'));
+    }
+
+    // ============================================================
+    // A — Vintage VU Meter (matching the Waves reference)
+    // ============================================================
+    function drawVintage(canvas, levelL, levelR) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Outer frame
+      ctx.fillStyle = darkMode ? '#1a1a1a' : '#888';
+      ctx.fillRect(0, 0, w, h);
+
+      // Inner border
+      ctx.fillStyle = darkMode ? '#2a2a2a' : '#999';
+      ctx.fillRect(4, 4, w - 8, h - 8);
+
+      const meterW = (w - 30) / 2;
+      const meterH = h - 20;
+
+      drawVintageGauge(ctx, 10, 10, meterW, meterH, levelL, 'L');
+      drawVintageGauge(ctx, meterW + 20, 10, meterW, meterH, levelR, 'R');
+    }
+
+    // Maps dB value to arc position (0..1) using the same spacing as real VU meters.
+    // The key insight: on a real VU meter, -20 to 0 dB takes ~87% of the arc,
+    // and 0 to +3 takes ~13%. Within the -20..0 range the spacing is logarithmic.
+    function dbToArcPosition(db) {
+      // Fixed positions matching real VU meter scale spacing
+      const map = [
+        [-20, 0.00], [-10, 0.20], [-7, 0.30], [-5, 0.40],
+        [-3, 0.50], [-2, 0.57], [-1, 0.64], [0, 0.72],
+        [1, 0.81], [2, 0.90], [3, 1.00]
+      ];
+      // Interpolate
+      if (db <= map[0][0]) return map[0][1];
+      if (db >= map[map.length - 1][0]) return map[map.length - 1][1];
+      for (let i = 0; i < map.length - 1; i++) {
+        if (db >= map[i][0] && db <= map[i + 1][0]) {
+          const frac = (db - map[i][0]) / (map[i + 1][0] - map[i][0]);
+          return map[i][1] + frac * (map[i + 1][1] - map[i][1]);
+        }
+      }
+      return 0;
+    }
+
+    function drawVintageGauge(ctx, ox, oy, w, h, level, label) {
+      // Cream/warm panel
+      const grad = ctx.createLinearGradient(ox, oy, ox, oy + h);
+      grad.addColorStop(0, '#f5ecd0');
+      grad.addColorStop(0.5, '#f8f1dc');
+      grad.addColorStop(1, '#ece3c8');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(ox, oy, w, h, 4);
+      ctx.fill();
+
+      ctx.strokeStyle = '#8a7e6a';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Pivot is BELOW the panel (hidden by the frame) — large radius makes a flat arc
+      const cx = ox + w / 2;
+      const cy = oy + h + h * 0.55;       // well below the panel bottom
+      const radius = h * 1.3;              // large radius = flat arc at top
+
+      // Very shallow arc: ~25° each side of vertical
+      const startAngle = Math.PI * 1.28;   // ~230°
+      const endAngle = Math.PI * 1.72;     // ~310°
+      const arcRange = endAngle - startAngle;
+
+      // Clip to the panel so needle/pivot below panel edge are hidden
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(ox + 1, oy + 1, w - 2, h - 2, 4);
+      ctx.clip();
+
+      // ---- VU text (near bottom where needle enters) ----
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold ${Math.max(12, h * 0.13)}px serif`;
+      ctx.fillStyle = '#333';
+      ctx.fillText('VU', cx, oy + h * 0.82);
+
+      // ---- dB scale ----
+      const dbTicks = [
+        { db: -20, label: '20' }, { db: -10, label: '10' },
+        { db: -7, label: '7' }, { db: -5, label: '5' },
+        { db: -3, label: '3' }, { db: -2, label: '2' },
+        { db: -1, label: '1' }, { db: 0, label: '0' },
+        { db: 1, label: '1' }, { db: 2, label: '2' }, { db: 3, label: '3' }
+      ];
+
+      const dbFontSize = Math.max(10, Math.min(15, w * 0.045));
+      ctx.font = `bold ${dbFontSize}px sans-serif`;
+
+      for (const tick of dbTicks) {
+        const t = dbToArcPosition(tick.db);
+        const angle = startAngle + t * arcRange;
+        const isRed = tick.db >= 0;
+
+        // Major tick
+        const innerR = radius * 0.90;
+        const outerR = radius * 0.96;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
+        ctx.lineTo(cx + Math.cos(angle) * outerR, cy + Math.sin(angle) * outerR);
+        ctx.strokeStyle = isRed ? '#c02316' : '#333';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Label
+        const labelR = radius * 0.83;
+        ctx.fillStyle = isRed ? '#c02316' : '#333';
+        ctx.fillText(tick.label,
+          cx + Math.cos(angle) * labelR,
+          cy + Math.sin(angle) * labelR
+        );
+      }
+
+      // Minor ticks
+      for (let i = 0; i < dbTicks.length - 1; i++) {
+        const t0 = dbToArcPosition(dbTicks[i].db);
+        const t1 = dbToArcPosition(dbTicks[i + 1].db);
+        const tMid = (t0 + t1) / 2;
+        const angle = startAngle + tMid * arcRange;
+        const innerR = radius * 0.93;
+        const outerR = radius * 0.96;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
+        ctx.lineTo(cx + Math.cos(angle) * outerR, cy + Math.sin(angle) * outerR);
+        ctx.strokeStyle = '#aaa';
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+      }
+
+      // Main arc
+      const zeroAngle = startAngle + dbToArcPosition(0) * arcRange;
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, startAngle, zeroAngle, false);
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, zeroAngle, endAngle, false);
+      ctx.strokeStyle = '#c02316';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // ---- Percentage scale (subtle, below main arc) ----
+      const pctTicks = [
+        { pct: 0, label: '0' }, { pct: 20, label: '20' },
+        { pct: 40, label: '40' }, { pct: 60, label: '60' },
+        { pct: 80, label: '80' }, { pct: 100, label: '100' }
+      ];
+      const pctFontSize = Math.max(7, Math.min(9, w * 0.025));
+      ctx.font = `${pctFontSize}px sans-serif`;
+      ctx.fillStyle = '#999';
+
+      for (const tick of pctTicks) {
+        const db = -20 + (tick.pct / 100) * 20;
+        const t = dbToArcPosition(db);
+        const angle = startAngle + t * arcRange;
+        const labelR = radius * 1.06;
+        const tickInner = radius * 1.01;
+        const tickOuter = radius * 1.03;
+
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * tickInner, cy + Math.sin(angle) * tickInner);
+        ctx.lineTo(cx + Math.cos(angle) * tickOuter, cy + Math.sin(angle) * tickOuter);
+        ctx.strokeStyle = '#bbb';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+
+        ctx.fillText(tick.label,
+          cx + Math.cos(angle) * labelR,
+          cy + Math.sin(angle) * labelR
+        );
+      }
+
+      // ---- Needle ----
+      const db = -20 + level * 23;
+      const needleT = dbToArcPosition(db);
+      const needleAngle = startAngle + needleT * arcRange;
+      const needleLen = radius * 0.97;
+
+      // Shadow
+      ctx.beginPath();
+      ctx.moveTo(cx + 1, cy + 1);
+      ctx.lineTo(cx + Math.cos(needleAngle) * needleLen + 1, cy + Math.sin(needleAngle) * needleLen + 1);
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Needle
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(needleAngle) * needleLen, cy + Math.sin(needleAngle) * needleLen);
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Restore clip
+      ctx.restore();
+
+      // Decorative screw (top right, drawn outside clip)
+      ctx.beginPath();
+      ctx.arc(ox + w - 14, oy + 14, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#c0b8a0';
+      ctx.fill();
+      ctx.strokeStyle = '#a09880';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ox + w - 17, oy + 14);
+      ctx.lineTo(ox + w - 11, oy + 14);
+      ctx.strokeStyle = '#998e78';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // ============================================================
+    // B — Minimal VU Meter
+    // ============================================================
+    function drawMinimal(canvas, levelL, levelR) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#0f0f17' : '#f5f5f5';
+      ctx.fillRect(0, 0, w, h);
+
+      drawMinimalGauge(ctx, 0, 0, w / 2 - 5, h, levelL, 'L');
+      drawMinimalGauge(ctx, w / 2 + 5, 0, w / 2 - 5, h, levelR, 'R');
+    }
+
+    function drawMinimalGauge(ctx, ox, oy, w, h, level, label) {
+      const cx = ox + w / 2;
+      const cy = oy + h * 0.9;
+      const radius = Math.min(w * 0.44, h * 0.75);
+
+      const startAngle = Math.PI * 1.22;
+      const endAngle = Math.PI * 1.78;
+      const arcRange = endAngle - startAngle;
+
+      // Thin arc background
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, startAngle, endAngle, false);
+      ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 20;
+      ctx.stroke();
+
+      // Filled arc (green to red gradient based on level)
+      const fillEnd = startAngle + level * arcRange;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, startAngle, fillEnd, false);
+      if (level < 0.7) {
+        ctx.strokeStyle = '#22c55e';
+      } else if (level < 0.87) {
+        ctx.strokeStyle = '#eab308';
+      } else {
+        ctx.strokeStyle = '#ef4444';
+      }
+      ctx.lineWidth = 20;
+      ctx.lineCap = 'butt';
+      ctx.stroke();
+
+      // Thin needle line
+      const needleAngle = startAngle + level * arcRange;
+      const needleLen = radius * 1.12;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(needleAngle) * needleLen, cy + Math.sin(needleAngle) * needleLen);
+      ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.7)';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // Pivot
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = darkMode ? '#fff' : '#333';
+      ctx.fill();
+
+      // Label
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
+      ctx.fillText(label, cx, cy - radius * 0.3);
+
+      // dB value
+      const db = Math.round(-20 + level * 23);
+      ctx.font = '24px monospace';
+      ctx.fillStyle = darkMode ? '#fff' : '#222';
+      ctx.fillText(`${db} dB`, cx, cy - radius * 0.55);
+    }
+
+    // ============================================================
+    // C — Modern Flat (horizontal bar style)
+    // ============================================================
+    function drawModernFlat(canvas, levelL, levelR) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#111827' : '#f0f0f0';
+      ctx.fillRect(0, 0, w, h);
+
+      const barH = 30;
+      const padL = 30;
+      const padR = 65;
+      const barW = w - padL - padR;
+
+      // L channel
+      drawFlatBar(ctx, padL, 30, barW, barH, levelL, 'L');
+      // R channel
+      drawFlatBar(ctx, padL, 90, barW, barH, levelR, 'R');
+
+      // dB scale at bottom
+      ctx.textAlign = 'center';
+      ctx.font = '10px monospace';
+      ctx.fillStyle = '#666';
+      const dbMarks = [-20, -15, -10, -7, -5, -3, -1, 0, 1, 2, 3];
+      for (const db of dbMarks) {
+        const t = (db + 20) / 23;
+        const x = padL + t * barW;
+        ctx.fillText(db.toString(), x, 150);
+
+        // Tick
+        ctx.beginPath();
+        ctx.moveTo(x, 135);
+        ctx.lineTo(x, 142);
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    function drawFlatBar(ctx, x, y, w, h, level, label) {
+      // Background
+      ctx.fillStyle = darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 4);
+      ctx.fill();
+
+      // Segments
+      const segments = 46;
+      const segW = (w - (segments - 1) * 2) / segments;
+      const litSegments = Math.round(level * segments);
+
+      for (let i = 0; i < segments; i++) {
+        const sx = x + i * (segW + 2);
+        const isLit = i < litSegments;
+        const t = i / segments;
+
+        let color;
+        if (t < 0.6) {
+          color = isLit ? '#22c55e' : 'rgba(34,197,94,0.12)';
+        } else if (t < 0.87) {
+          color = isLit ? '#eab308' : 'rgba(234,179,8,0.12)';
+        } else {
+          color = isLit ? '#ef4444' : 'rgba(239,68,68,0.12)';
+        }
+
+        ctx.fillStyle = color;
+        if (isLit) {
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 4;
+        } else {
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+        }
+        ctx.fillRect(sx, y, segW, h);
+      }
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+
+      // Label
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillStyle = '#888';
+      ctx.fillText(label, x - 8, y + h / 2 + 5);
+
+      // Peak dB value
+      const db = Math.round(-20 + level * 23);
+      ctx.textAlign = 'left';
+      ctx.font = '12px monospace';
+      ctx.fillStyle = level > 0.87 ? '#ef4444' : '#888';
+      ctx.fillText(`${db}dB`, x + w + 8, y + h / 2 + 4);
+    }
+
+    // ============================================================
+    // D — Rainbow Equalizer (LED blocks with reflection)
+    // ============================================================
+    function drawRainbowEq(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#000' : '#f8f8f8';
+      ctx.fillRect(0, 0, w, h);
+
+      const bars = Math.min(bufferLength, 32);
+      const midY = h * 0.6;
+      const blockGap = 2;
+      const barGap = 3;
+      const barWidth = (w - barGap * (bars + 1)) / bars;
+      const maxBlocks = 14;
+      const blockH = (midY - maxBlocks * blockGap) / maxBlocks;
+
+      // Rainbow hue for each bar
+      for (let i = 0; i < bars; i++) {
+        const value = dataArray[i] / 255;
+        const litBlocks = Math.round(value * maxBlocks);
+        const x = barGap + i * (barWidth + barGap);
+        const hue = (i / bars) * 300; // purple -> red -> orange -> yellow -> green -> cyan -> blue
+
+        for (let j = 0; j < maxBlocks; j++) {
+          const isLit = j < litBlocks;          // j=0 is bottom block
+          const y = midY - (j + 1) * (blockH + blockGap); // stack upward from midY
+
+          if (isLit) {
+            ctx.shadowColor = `hsl(${hue}, 100%, 60%)`;
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = `hsl(${hue}, 90%, ${55 + j * 2}%)`;
+          } else {
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = darkMode ? `hsla(${hue}, 40%, 15%, 0.4)` : `hsla(${hue}, 30%, 85%, 0.5)`;
+          }
+          ctx.fillRect(x, y, barWidth, blockH);
+
+          // Reflection (below midY, faded)
+          if (isLit) {
+            const ry = midY + j * (blockH + blockGap) + blockGap;
+            const fade = 0.35 - (j / maxBlocks) * 0.3;
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = `hsla(${hue}, 80%, 50%, ${fade})`;
+            ctx.fillRect(x, ry, barWidth, blockH);
+          }
+        }
+      }
+
+      ctx.shadowBlur = 0;
+
+      // Reflection gradient overlay
+      const reflGrad = ctx.createLinearGradient(0, midY, 0, h);
+      const reflBg = darkMode ? '0,0,0' : '248,248,248';
+      reflGrad.addColorStop(0, `rgba(${reflBg},0)`);
+      reflGrad.addColorStop(1, `rgba(${reflBg},0.85)`);
+      ctx.fillStyle = reflGrad;
+      ctx.fillRect(0, midY, w, h - midY);
+    }
+
+    // ============================================================
+    // E — Neon Waves (glowing layered waves with reflection)
+    // ============================================================
+    const waveHistory = [];
+    const WAVE_LAYERS = 4;
+    const waveColors = [
+      { r: 0, g: 200, b: 255 },   // cyan
+      { r: 150, g: 50, b: 255 },   // purple
+      { r: 255, g: 50, b: 150 },   // pink
+      { r: 50, g: 255, b: 200 },   // teal
+    ];
+    let waveTime = 0;
+
+    function drawNeonWaves(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      const midY = h * 0.45;
+
+      ctx.fillStyle = darkMode ? '#050515' : '#f5f5ff';
+      ctx.fillRect(0, 0, w, h);
+
+      waveTime += 0.02;
+
+      for (let layer = 0; layer < WAVE_LAYERS; layer++) {
+        const c = waveColors[layer];
+        const baseAlpha = 0.6 + layer * 0.1;
+        const phaseOffset = layer * 1.3;
+        const freqMult = 1 + layer * 0.3;
+        const ampScale = 0.7 + layer * 0.1;
+
+        // Build wave path from frequency data
+        const points = [];
+        const segments = 100;
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          const x = t * w;
+
+          // Sample frequency data
+          const dataIdx = Math.floor(t * Math.min(bufferLength, 64));
+          const freqValue = (dataArray[dataIdx] || 0) / 255;
+
+          // Combine frequency data with sine waves
+          const wave = Math.sin(t * Math.PI * 3 * freqMult + waveTime + phaseOffset) * freqValue * ampScale;
+          const wave2 = Math.sin(t * Math.PI * 5 + waveTime * 1.3 + phaseOffset) * freqValue * 0.3;
+          const y = midY + (wave + wave2) * midY * 0.7;
+
+          points.push({ x, y });
+        }
+
+        // Draw glow layers (multiple passes for glow effect)
+        for (let glow = 3; glow >= 0; glow--) {
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+
+          // Smooth curve through points
+          for (let i = 1; i < points.length - 1; i++) {
+            const cpx = (points[i].x + points[i + 1].x) / 2;
+            const cpy = (points[i].y + points[i + 1].y) / 2;
+            ctx.quadraticCurveTo(points[i].x, points[i].y, cpx, cpy);
+          }
+
+          const blur = glow * 6 + 2;
+          const alpha = glow === 0 ? baseAlpha : baseAlpha * 0.15 / (glow * 0.5);
+          ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${alpha})`;
+          ctx.lineWidth = glow === 0 ? 2 : blur;
+          ctx.shadowColor = `rgba(${c.r},${c.g},${c.b},0.5)`;
+          ctx.shadowBlur = glow === 0 ? 10 : 0;
+          ctx.stroke();
+        }
+
+        // Reflection
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, midY + (midY - points[0].y));
+        for (let i = 1; i < points.length - 1; i++) {
+          const ry = midY + (midY - points[i].y);
+          const rny = midY + (midY - points[i + 1].y);
+          const cpx = (points[i].x + points[i + 1].x) / 2;
+          const cpy = (ry + rny) / 2;
+          ctx.quadraticCurveTo(points[i].x, ry, cpx, cpy);
+        }
+        ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${baseAlpha * 0.15})`;
+        ctx.lineWidth = 1.5;
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+      }
+
+      ctx.shadowBlur = 0;
+
+      // Reflection fade
+      const neonBg = darkMode ? '5,5,21' : '245,245,255';
+      const neonReflGrad = ctx.createLinearGradient(0, midY, 0, h);
+      neonReflGrad.addColorStop(0, `rgba(${neonBg},0)`);
+      neonReflGrad.addColorStop(0.6, `rgba(${neonBg},0.7)`);
+      neonReflGrad.addColorStop(1, `rgba(${neonBg},0.95)`);
+      ctx.fillStyle = neonReflGrad;
+      ctx.fillRect(0, midY, w, h - midY);
+
+      // Subtle horizon line
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      ctx.lineTo(w, midY);
+      ctx.strokeStyle = darkMode ? 'rgba(100,150,255,0.08)' : 'rgba(100,100,200,0.15)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // ============================================================
+    // F — 3D Spectrum (isometric frequency bars with history)
+    // ============================================================
+    const spectrumHistory = [];
+    const HISTORY_DEPTH = 20;
+    let spectrumFrame = 0;
+
+    function drawSpectrum3D(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#000' : '#f0f0f0';
+      ctx.fillRect(0, 0, w, h);
+
+      const bars = Math.min(bufferLength, 32);
+
+      // Store current frame
+      spectrumFrame++;
+      if (spectrumFrame % 3 === 0) {
+        const frame = new Uint8Array(bars);
+        for (let i = 0; i < bars; i++) frame[i] = dataArray[i];
+        spectrumHistory.unshift(frame); // newest at front
+        if (spectrumHistory.length > HISTORY_DEPTH) spectrumHistory.pop();
+      }
+
+      // Isometric projection: X = right, Z = into screen (up-left)
+      const baseX = w * 0.08;
+      const baseY = h * 0.88;
+      const barW = (w * 0.65) / bars;
+      const barGap = 1;
+      const zStepX = 8;    // each depth row shifts right
+      const zStepY = -8;   // and up
+      const maxBarH = h * 0.5;
+
+      // Draw back to front (z = oldest first, newest last/front)
+      for (let z = spectrumHistory.length - 1; z >= 0; z--) {
+        const frame = spectrumHistory[z];
+        const fade = 0.25 + ((spectrumHistory.length - 1 - z) / HISTORY_DEPTH) * 0.75;
+        const rowX = baseX + z * zStepX;
+        const rowY = baseY + z * zStepY;
+
+        for (let i = 0; i < bars; i++) {
+          const value = frame[i] / 255;
+          const barH = value * maxBarH;
+          if (barH < 1) continue;
+
+          const x = rowX + i * (barW + barGap);
+          const topY = rowY - barH;
+
+          const hue = (i / bars) * 300;
+          const sat = 80;
+          const lit = 40 + value * 25;
+
+          // Front face
+          ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit}%, ${fade})`;
+          ctx.fillRect(x, topY, barW, barH);
+
+          // Top face (parallelogram going into depth)
+          ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit + 15}%, ${fade * 0.7})`;
+          ctx.beginPath();
+          ctx.moveTo(x, topY);
+          ctx.lineTo(x + zStepX, topY + zStepY);
+          ctx.lineTo(x + barW + zStepX, topY + zStepY);
+          ctx.lineTo(x + barW, topY);
+          ctx.closePath();
+          ctx.fill();
+
+          // Right face
+          ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lit - 12}%, ${fade * 0.5})`;
+          ctx.beginPath();
+          ctx.moveTo(x + barW, topY);
+          ctx.lineTo(x + barW + zStepX, topY + zStepY);
+          ctx.lineTo(x + barW + zStepX, rowY + zStepY);
+          ctx.lineTo(x + barW, rowY);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      // Floor grid
+      ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.06)';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i <= bars; i += 4) {
+        const x = baseX + i * (barW + barGap);
+        ctx.beginPath();
+        ctx.moveTo(x, baseY);
+        ctx.lineTo(x + HISTORY_DEPTH * zStepX, baseY + HISTORY_DEPTH * zStepY);
+        ctx.stroke();
+      }
+      for (let z = 0; z <= HISTORY_DEPTH; z += 4) {
+        ctx.beginPath();
+        ctx.moveTo(baseX + z * zStepX, baseY + z * zStepY);
+        ctx.lineTo(baseX + bars * (barW + barGap) + z * zStepX, baseY + z * zStepY);
+        ctx.stroke();
+      }
+    }
+
+    // ============================================================
+    // G — 3D Bars (static, no history — just current frequencies)
+    // ============================================================
+    function drawStatic3D(canvas) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = darkMode ? '#000' : '#f0f0f0';
+      ctx.fillRect(0, 0, w, h);
+
+      const bars = Math.min(bufferLength, 32);
+      const baseX = w * 0.08;
+      const baseY = h * 0.88;
+      const barW = (w * 0.65) / bars;
+      const barGap = 1;
+      const maxBarH = h * 0.5;
+      // Same isometric angle as the history version (45°)
+      const depthX = 8;
+      const depthY = -8;
+
+      for (let i = 0; i < bars; i++) {
+        const value = dataArray[i] / 255;
+        const barH = value * maxBarH;
+        if (barH < 1) continue;
+
+        const x = baseX + i * (barW + barGap);
+        const topY = baseY - barH;
+
+        const hue = (i / bars) * 300;
+        const sat = 85;
+        const lit = 40 + value * 25;
+
+        // Front face
+        ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lit}%)`;
+        ctx.fillRect(x, topY, barW, barH);
+
+        // Top face
+        ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lit + 18}%)`;
+        ctx.beginPath();
+        ctx.moveTo(x, topY);
+        ctx.lineTo(x + depthX, topY + depthY);
+        ctx.lineTo(x + barW + depthX, topY + depthY);
+        ctx.lineTo(x + barW, topY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Right face
+        ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lit - 12}%)`;
+        ctx.beginPath();
+        ctx.moveTo(x + barW, topY);
+        ctx.lineTo(x + barW + depthX, topY + depthY);
+        ctx.lineTo(x + barW + depthX, baseY + depthY);
+        ctx.lineTo(x + barW, baseY);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Floor line
+      ctx.beginPath();
+      ctx.moveTo(baseX, baseY);
+      ctx.lineTo(baseX + bars * (barW + barGap), baseY);
+      ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  </script>
+</body>
+</html>

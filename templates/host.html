@@ -149,7 +149,7 @@
     }
 
     .is-fullscreen #audioVisualizer {
-      height: 200px !important;
+      height: 240px !important;
     }
 
     .is-fullscreen #compactPinDisplay {
@@ -503,7 +503,7 @@
           <h3 class="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6 text-center">Who is the artist?</h3>
 
           <!-- Timer Progress Bar -->
-          <div class="mb-4">
+          <div class="mb-6">
             <div class="flex justify-between items-center mb-2">
               <span class="text-sm font-semibold text-gray-600 dark:text-gray-400">Time Remaining</span>
               <span id="timeRemaining" class="text-sm font-bold text-primary">10s</span>
@@ -520,7 +520,7 @@
 
           <!-- Audio Visualizer -->
           <div class="mb-6 bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-            <canvas id="audioVisualizer" class="w-full rounded" style="height: 120px;" role="img" aria-label="Audio visualizer"></canvas>
+            <canvas id="audioVisualizer" class="w-full rounded" style="height: 144px;" role="img" aria-label="Audio visualizer"></canvas>
           </div>
 
           <!-- Answer Options Grid -->
@@ -829,6 +829,64 @@
                   class="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600">
                 </div>
               </label>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="font-medium text-gray-700 dark:text-gray-300">Visualizer Style</p>
+              </div>
+              <select id="settingVisualizerStyle"
+                class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                <option value="vintage-dark">Vintage VU (Dark)</option>
+                <option value="vintage-light">Vintage VU (Light)</option>
+                <option value="flat-dark">Flat Bars (Dark)</option>
+                <option value="flat-light">Flat Bars (Light)</option>
+                <option value="rainbow-dark">Rainbow EQ (Dark)</option>
+                <option value="rainbow-light">Rainbow EQ (Light)</option>
+                <option value="neon-dark">Neon Waves (Dark)</option>
+                <option value="neon-light">Neon Waves (Light)</option>
+                <option value="spectrum3d-dark">3D Spectrum (Dark)</option>
+                <option value="spectrum3d-light">3D Spectrum (Light)</option>
+                <option value="bars-dark">Classic Bars (Dark)</option>
+                <option value="bars-light">Classic Bars (Light)</option>
+                <option value="mirror-dark">Mirror (Dark)</option>
+                <option value="mirror-light">Mirror (Light)</option>
+                <option value="led-dark">LED Bars (Dark)</option>
+                <option value="led-light">LED Bars (Light)</option>
+              </select>
+            </div>
+
+            <div id="micVisualizerSetting" class="space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="font-medium text-gray-700 dark:text-gray-300">Microphone Visualizer</p>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">Use ambient audio from your mic for the visualizer during Spotify playback</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="settingMicVisualizer" class="sr-only peer">
+                  <div
+                    class="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600">
+                  </div>
+                </label>
+              </div>
+              <div id="micSensitivitySetting" class="hidden pl-2">
+                <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Mic Sensitivity: <span id="micSensitivityValue">4</span>x
+                </label>
+                <input type="range" id="settingMicSensitivity" min="1" max="10" value="4" step="0.5"
+                  class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-600">
+                <div class="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>Low</span>
+                  <span>High</span>
+                </div>
+                <div class="mt-3 flex items-center gap-2">
+                  <span class="text-xs text-gray-500 dark:text-gray-400">Mic Level:</span>
+                  <div class="flex-1 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div id="micLevelBar" class="h-full bg-green-500 rounded-full transition-all duration-75" style="width: 0%"></div>
+                  </div>
+                  <span id="micLevelStatus" class="text-xs text-gray-400">Off</span>
+                </div>
+              </div>
             </div>
           </div>
 

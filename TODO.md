@@ -34,3 +34,5 @@ https://eventlet.readthedocs.io/en/latest/asyncio/migration.html
 
 - [ ] replace the start game with a modal
 - [X] fix the unique id for the leaderboard
+
+- [ ] when we disconnect from the device in connect we have to stop the song
